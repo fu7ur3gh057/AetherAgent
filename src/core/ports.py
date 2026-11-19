@@ -88,3 +88,9 @@ class ReminderStore(Protocol):
     async def record_reminder_failure(self, reminder_id: int, max_failures: int) -> int:
         """Увеличить счётчик неудач доставки; после max_failures статус failed. Возвращает счётчик."""
         ...
+
+
+class Transcriber(Protocol):
+    async def transcribe(self, audio: bytes, mime_type: str) -> str:
+        """Расшифровать речь из аудио/видео. Пустая строка, если речи нет."""
+        ...

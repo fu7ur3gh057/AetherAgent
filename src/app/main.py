@@ -12,7 +12,7 @@ from src.app import digest
 from src.app.config import get_settings
 from src.app.reminders import ReminderService
 from src.app.scheduler import DailyJob, Scheduler
-from src.app.wiring import make_provider
+from src.app.wiring import make_provider, make_transcriber
 from src.core.agent import Agent
 
 log = logging.getLogger(__name__)
@@ -23,6 +23,14 @@ async def _heartbeat():
     while True:
         HEARTBEAT.touch()
         await asyncio.sleep(30)
+
+
+async def _warmup(transcriber):
+    try:
+        await transcriber.warmup()
+        log.info("голосовые: модель распознавания готова")
+    except Exception:
+        log.exception("не удалось заранее загрузить модель распознавания (загрузится при первом голосовом)")
 
 
 async def main():
@@ -37,11 +45,18 @@ async def main():
     bot = make_bot(s.telegram_bot_token)
     confirmer = TelegramConfirmer(bot)
     agent = Agent(make_provider(s), store, s.system_prompt, s.history_limit, confirmer, tz, memories=store)
-    dp = build_dispatcher(agent, s.allowed_ids, confirmer, tz, reminders=store)
+    transcriber = make_transcriber(s)
+    log.info("голосовые: %s", type(transcriber).__name__ if transcriber else "выключены")
+    dp = build_dispatcher(
+        agent, s.allowed_ids, confirmer, tz, reminders=store,
+        transcriber=transcriber, voice_max_seconds=s.voice_max_seconds,
+    )
 
     notifier = TelegramNotifier(bot)
     reminder_service = ReminderService(store, notifier, store, tz)
     tasks = [asyncio.create_task(_heartbeat()), asyncio.create_task(reminder_service.run_forever())]
+    if hasattr(transcriber, "warmup"):
+        tasks.append(asyncio.create_task(_warmup(transcriber)))
 
     at = s.digest_at
     if at is not None:

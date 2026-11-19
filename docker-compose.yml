@@ -22,9 +22,15 @@ services:
       - aether-net
 
   bot:
-    build: .
+    build:
+      context: .
+      args:
+        WITH_WHISPER: ${WITH_WHISPER:-0}
     container_name: aether_bot
     restart: always
+    # Сервер общий с Glent и GODA: бот (и локальный Whisper) не должен отнимать у них ресурсы
+    cpus: "2.0"
+    mem_limit: 3g
     env_file:
       - .env
     volumes:
