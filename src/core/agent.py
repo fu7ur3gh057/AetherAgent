@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone, tzinfo
 
 from src.core import alerts
-from src.core.context import current_chat_id
+from src.core.context import current_chat_id, usage_reporter
 from src.core.messages import Attachment, HistoryItem, MemoryItem, Message, ToolCall, ToolResult, Usage, UsageSummary
 from src.core.ports import Confirmer, LLMProvider, MemoryStore, MessageStore, UsageStore
 from src.core.tools import REGISTRY, specs
@@ -56,6 +56,7 @@ class Agent:
     async def handle(self, chat_id: int, text: str, attachments: list[Attachment] | None = None) -> str:
         async with self._locks[chat_id]:
             current_chat_id.set(chat_id)
+            usage_reporter.set(self._record_usage_for)
             return await self._handle(chat_id, text, attachments or [])
 
     async def _handle(self, chat_id: int, text: str, attachments: list[Attachment]) -> str:
@@ -101,10 +102,12 @@ class Agent:
         return datetime.now(self.tz).date()
 
     async def _record_usage(self, u: Usage | None) -> None:
+        await self._record_usage_for(getattr(self.llm, "model_name", type(self.llm).__name__), u)
+
+    async def _record_usage_for(self, model: str, u: Usage | None) -> None:
         if self.usage is None or u is None:
             return
         try:
-            model = getattr(self.llm, "model_name", type(self.llm).__name__)
             await self.usage.add_usage(self._today(), model, u.input_tokens, u.output_tokens)
         except Exception:  # учёт не должен ломать ответ
             log.warning("не удалось записать расход токенов", exc_info=True)

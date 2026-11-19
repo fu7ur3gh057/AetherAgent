@@ -43,6 +43,7 @@ async def _startup_notice(s, transcriber, notifier) -> None:
         f"Модель: {s.llm_provider}",
         f"Голосовые: {type(transcriber).__name__ if transcriber else 'выключены'}",
         f"Gmail: {'вкл' if 'gmail_unread' in REGISTRY else 'выкл'} · отправка: {'вкл' if 'gmail_send' in REGISTRY else 'выкл'}",
+        f"Поиск в интернете: {'вкл' if 'web_search' in REGISTRY else 'выкл'}",
         f"Сводка: {s.digest_time or 'выкл'} · лимит токенов: {s.daily_token_limit or 'нет'}",
     ]
     for chat_id in sorted(s.allowed_ids):
@@ -60,7 +61,10 @@ async def main():
     tz = s.tz  # заодно проверяет TIMEZONE при старте
 
     store = PostgresStore(s.database_url)
-    capabilities.load_all(memory_store=store, reminder_store=store, tz=tz)
+    search = None
+    if s.web_search_enabled and s.gemini_api_key:
+        search = (s.gemini_api_key, s.web_search_model or s.gemini_model, s.web_search_daily_limit)
+    capabilities.load_all(memory_store=store, reminder_store=store, tz=tz, web_search=search)
     bot = make_bot(s.telegram_bot_token)
     confirmer = TelegramConfirmer(bot)
     agent = Agent(

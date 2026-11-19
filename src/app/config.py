@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # Срок жизни токена Google в режиме Testing (дни); за 2 дня до него бот предупреждает. 0 = не предупреждать
     google_token_max_age_days: int = 7
 
+
+    # Поиск в интернете через Gemini + Google (нужен GEMINI_API_KEY). Дневной лимит поисков: 0 = без лимита
+    web_search_enabled: bool = True
+    web_search_model: str = ""  # по умолчанию GEMINI_MODEL
+    web_search_daily_limit: int = 50
+
     system_prompt_path: Path = ROOT / "src" / "prompts" / "system.md"
 
     @property

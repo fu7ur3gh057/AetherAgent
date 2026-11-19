@@ -16,6 +16,7 @@ def load_all(
     memory_store: MemoryStore | None = None,
     reminder_store: ReminderStore | None = None,
     tz: tzinfo = timezone.utc,
+    web_search: tuple[str, str, int] | None = None,  # (ключ Gemini, модель, дневной лимит поисков)
 ) -> None:
     from src.capabilities import clock  # noqa: F401
 
@@ -38,3 +39,11 @@ def load_all(
 
         reminders.register(reminder_store, tz)
         log.info("capability reminders: включена")
+
+    if web_search is not None:
+        from src.capabilities import web_search as ws
+
+        ws.register(web_search[0], web_search[1], tz, web_search[2])
+        log.info("capability web_search: включена (лимит %s/день)", web_search[2] or "нет")
+    else:
+        log.info("capability web_search: выключена (нужен GEMINI_API_KEY и WEB_SEARCH_ENABLED=true)")
