@@ -80,15 +80,19 @@ class Agent:
         # следующее сообщение не должно перемешать историю
         self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    async def handle(self, chat_id: int, text: str, attachments: list[Attachment] | None = None) -> str:
+    async def handle(
+        self, chat_id: int, text: str, attachments: list[Attachment] | None = None, extra_system: str | None = None
+    ) -> str:
         async with self._locks[chat_id]:
             current_chat_id.set(chat_id)
             usage_reporter.set(self._record_usage_for)
-            return await self._handle(chat_id, text, attachments or [])
+            return await self._handle(chat_id, text, attachments or [], extra_system)
 
-    async def _handle(self, chat_id: int, text: str, attachments: list[Attachment]) -> str:
+    async def _handle(self, chat_id: int, text: str, attachments: list[Attachment], extra_system: str | None = None) -> str:
         history = await self.store.history(chat_id, self.history_limit)
         system = await self._system(chat_id)
+        if extra_system:
+            system = f"{system}\n\n{extra_system}"  # только для этого хода, в историю не попадает
         new: list[Message] = [Message(role="user", text=text, attachments=attachments)]
         reply = ""
         # «заражённый» ход: в нём уже есть данные из внешнего мира (письма, а также содержимое вложений:

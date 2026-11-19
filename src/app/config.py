@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     timezone: str = "UTC"
     # Утренняя сводка почты: время HH:MM в TIMEZONE; пусто = выключено
     digest_time: str = ""
+    # Разделы сводки через запятую: mail, weather, rates, news, sports (недоступные без Gmail/веб-поиска пропускаются)
+    digest_sections: str = "mail,weather,rates"
+    # Что искать в разделах; пусто = взять из заметок о владельце (город по умолчанию из TIMEZONE)
+    digest_city: str = ""
+    digest_rates: str = ""  # например: USD и EUR к AZN
+    digest_news_topics: str = ""  # например: технологии, футбол
+    digest_sports: str = ""  # например: Реал Мадрид, Барселона
     # дни недели для сводки (1=пн ... 7=вс)
     digest_days: str = "1,2,3,4,5,6,7"
 
@@ -111,6 +118,21 @@ class Settings(BaseSettings):
             return time.fromisoformat(self.health_check_time.strip())
         except ValueError:
             raise SystemExit("HEALTH_CHECK_TIME должен быть в формате HH:MM, например 09:05") from None
+
+    @property
+    def digest_section_list(self) -> list[str]:
+        from src.app.digest import parse_sections
+
+        try:
+            return parse_sections(self.digest_sections)
+        except ValueError as e:
+            raise SystemExit(f"DIGEST_SECTIONS: {e}") from None
+
+    @property
+    def digest_city_name(self) -> str:
+        if self.digest_city.strip():
+            return self.digest_city.strip()
+        return self.timezone.rsplit("/", 1)[-1].replace("_", " ") if "/" in self.timezone else ""
 
     @property
     def digest_weekdays(self) -> set[int]:

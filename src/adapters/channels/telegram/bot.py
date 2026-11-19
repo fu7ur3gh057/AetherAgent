@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+from typing import Awaitable, Callable
 from datetime import datetime, timedelta, timezone, tzinfo
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -87,6 +88,7 @@ def build_dispatcher(
     transcriber: Transcriber | None = None,
     voice_max_seconds: int = 300,
     watchers: WatcherStore | None = None,
+    digest_now: Callable[[int], Awaitable[str]] | None = None,
 ) -> Dispatcher:
     router = Router()
     # доступ только владельцу; остальным бот молчит (и на сообщения, и на нажатия кнопок)
@@ -205,6 +207,7 @@ def build_dispatcher(
             "👋 Aether на связи. Пиши вопрос или просьбу, например «что в почте?». Могу искать в интернете, понимать голосовые, фото, PDF и файлы.\n\n"
             "🕘 /history [N] — последние реплики\n"
             "🔎 /search слово — поиск по истории\n"
+            "📰 /digest — сводка сейчас\n"
             "⏰ /reminders — активные напоминания\n"
             "🔭 /watchers — наблюдатели\n"
             "🧠 /memory — что я о тебе помню\n"
@@ -231,6 +234,19 @@ def build_dispatcher(
             return
         items = await agent.search(m.chat.id, command.args.strip(), MAX_LIST)
         await _send_items(m, items, "🔍 Ничего не найдено.", tz)
+
+    @router.message(Command("digest"))
+    async def digest(m: Message):
+        if digest_now is None:
+            await m.answer("📰 Сводка недоступна: для неё нужен Gmail или веб-поиск.")
+            return
+        await m.bot.send_chat_action(m.chat.id, ChatAction.TYPING)
+        try:
+            reply = await digest_now(m.chat.id)
+        except Exception:
+            log.exception("digest failed")
+            reply = "⚠️ Не удалось собрать сводку, смотри логи."
+        await send_formatted(m, reply)
 
     @router.message(Command("usage"))
     async def usage(m: Message):

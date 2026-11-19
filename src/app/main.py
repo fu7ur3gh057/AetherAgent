@@ -45,7 +45,7 @@ async def _startup_notice(s, transcriber, notifier) -> None:
         f"Голосовые: {type(transcriber).__name__ if transcriber else 'выключены'}",
         f"Gmail: {'вкл' if 'gmail_unread' in REGISTRY else 'выкл'} · отправка: {'вкл' if 'gmail_send' in REGISTRY else 'выкл'}",
         f"Поиск в интернете: {'вкл' if 'web_search' in REGISTRY else 'выкл'} · ссылки: {'вкл' if 'read_url' in REGISTRY else 'выкл'} · наблюдатели: {'вкл' if 'watch_create' in REGISTRY else 'выкл'}",
-        f"Сводка: {s.digest_time or 'выкл'} · лимит токенов: {s.daily_token_limit or 'нет'}",
+        f"Сводка: {(s.digest_time + ' (' + ', '.join(digest.available_sections(s.digest_section_list)) + ')') if s.digest_time else 'выкл'} · лимит токенов: {s.daily_token_limit or 'нет'}",
     ]
     for chat_id in sorted(s.allowed_ids):
         try:
@@ -76,11 +76,19 @@ async def main():
         llm, store, s.system_prompt, s.history_limit, confirmer, tz,
         memories=store, usage=store, daily_token_limit=s.daily_token_limit,
     )
+    digest_instruction = digest.build_instruction(
+        s.digest_section_list, city=s.digest_city_name, rates=s.digest_rates, topics=s.digest_news_topics, sports=s.digest_sports
+    )
+
+    async def digest_now(chat_id: int) -> str:
+        return await digest.compose(agent, chat_id, digest_instruction)
+
     transcriber = make_transcriber(s)
     log.info("голосовые: %s", type(transcriber).__name__ if transcriber else "выключены")
     dp = build_dispatcher(
         agent, s.allowed_ids, confirmer, tz, reminders=store,
         transcriber=transcriber, voice_max_seconds=s.voice_max_seconds, watchers=store,
+        digest_now=digest_now if digest_instruction else None,
     )
 
     notifier = TelegramNotifier(bot)
@@ -109,21 +117,21 @@ async def main():
 
     at = s.digest_at
     if at is not None:
-        if digest.available():
+        if digest_instruction:
             scheduler = Scheduler(store, tz)
             scheduler.add(
                 DailyJob(
                     name="morning_digest",
                     at=at,
                     weekdays=s.digest_weekdays,
-                    run=partial(digest.run_digest, agent, notifier, s.allowed_ids),
+                    run=partial(digest.run_digest, agent, notifier, s.allowed_ids, digest_instruction),
                     on_giveup=partial(digest.notify_failure, notifier, s.allowed_ids),
                 )
             )
             tasks.append(asyncio.create_task(scheduler.run_forever()))
             log.info("утренняя сводка: %s %s, дни %s", at.strftime("%H:%M"), tz, sorted(s.digest_weekdays))
         else:
-            log.warning("DIGEST_TIME задан, но Gmail не подключён: сводка выключена")
+            log.warning("DIGEST_TIME задан, но нет ни Gmail, ни веб-поиска для выбранных разделов: сводка выключена")
 
     check_at = s.backup_check_at
     if check_at is not None:

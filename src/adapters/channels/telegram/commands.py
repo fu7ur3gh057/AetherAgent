@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 COMMANDS = [
     BotCommand(command="start", description="Что я умею"),
+    BotCommand(command="digest", description="Сводка сейчас: почта, погода, курсы"),
     BotCommand(command="reminders", description="Активные напоминания"),
     BotCommand(command="cancel", description="Отменить напоминание по номеру"),
     BotCommand(command="watchers", description="Наблюдатели: что отслеживаю"),
