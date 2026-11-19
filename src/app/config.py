@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -20,11 +20,16 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://aether:aether@localhost:5432/aether"
     history_limit: int = 30
-    system_prompt_path: Path = ROOT / "prompts" / "system.md"
+    system_prompt_path: Path = ROOT / "src" / "prompts" / "system.md"
 
     @property
     def allowed_ids(self) -> set[int]:
-        return {int(x) for x in self.allowed_user_ids.split(",") if x.strip()}
+        try:
+            return {int(x) for x in self.allowed_user_ids.split(",") if x.strip()}
+        except ValueError:
+            raise SystemExit(
+                "ALLOWED_USER_IDS должен содержать числовые Telegram ID через запятую"
+            ) from None
 
     @property
     def system_prompt(self) -> str:

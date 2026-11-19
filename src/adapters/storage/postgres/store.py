@@ -1,34 +1,14 @@
-"""История диалога в Postgres, в нейтральном формате (не привязана к провайдеру)."""
+"""PostgresStore: реализация порта MessageStore."""
 
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, String, Text, func, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from .llm.base import Message, ToolCall, ToolResult
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-class MessageRow(Base):
-    __tablename__ = "messages"
-    __table_args__ = (Index("ix_messages_chat_id_id", "chat_id", "id"),)
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger)
-    role: Mapped[str] = mapped_column(String(16))
-    text: Mapped[str] = mapped_column(Text, default="")
-    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+from src.adapters.storage.postgres.models import MessageRow
+from src.core.messages import Message, ToolCall, ToolResult
 
 
 def _to_row(chat_id: int, m: Message) -> MessageRow:
@@ -51,7 +31,7 @@ def _from_row(r: MessageRow) -> Message:
     )
 
 
-class Memory:
+class PostgresStore:
     def __init__(self, database_url: str):
         self._engine = create_async_engine(database_url, pool_pre_ping=True)
         self._sessions = async_sessionmaker(self._engine, expire_on_commit=False)
@@ -80,8 +60,6 @@ class Memory:
             await s.commit()
 
     async def clear(self, chat_id: int) -> None:
-        from sqlalchemy import delete
-
         async with self.session() as s:
             await s.execute(delete(MessageRow).where(MessageRow.chat_id == chat_id))
             await s.commit()

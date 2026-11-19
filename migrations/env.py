@@ -3,8 +3,8 @@ import asyncio
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from aether.config import get_settings
-from aether.memory import Base
+from src.adapters.storage.postgres.models import Base
+from src.app.config import get_settings
 
 target_metadata = Base.metadata
 url = get_settings().database_url

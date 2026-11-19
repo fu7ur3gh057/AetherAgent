@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from anthropic import AsyncAnthropic
 
-from .base import Message, ToolCall, ToolSpec
+from src.core.messages import Message, ToolCall, ToolSpec
 
 
 def _to_api(messages: list[Message]) -> list[dict]:

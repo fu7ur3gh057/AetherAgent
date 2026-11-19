@@ -7,7 +7,7 @@ from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from .agent import Agent
+from src.core.agent import Agent
 
 log = logging.getLogger(__name__)
 TG_LIMIT = 4096
@@ -29,7 +29,7 @@ def build_dispatcher(agent: Agent, allowed_ids: set[int]) -> Dispatcher:
 
     @router.message(Command("reset"))
     async def reset(m: Message):
-        await agent.memory.clear(m.chat.id)
+        await agent.reset(m.chat.id)
         await m.answer("История очищена.")
 
     @router.message(F.text)

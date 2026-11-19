@@ -6,7 +6,7 @@ import uuid
 from google import genai
 from google.genai import types
 
-from .base import Message, ToolCall, ToolSpec
+from src.core.messages import Message, ToolCall, ToolSpec
 
 
 def _to_contents(messages: list[Message]) -> list[types.Content]:

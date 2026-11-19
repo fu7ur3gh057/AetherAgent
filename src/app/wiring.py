@@ -1,16 +1,18 @@
-from ..config import Settings
-from .base import LLMProvider
+"""Composition root: единственное место, где ядро соединяется с адаптерами."""
+
+from src.app.config import Settings
+from src.core.ports import LLMProvider
 
 
 def make_provider(s: Settings) -> LLMProvider:
     if s.llm_provider == "claude":
-        from .claude import ClaudeProvider
+        from src.adapters.llm.claude import ClaudeProvider
 
         if not s.anthropic_api_key:
             raise RuntimeError("ANTHROPIC_API_KEY не задан")
         return ClaudeProvider(s.anthropic_api_key, s.claude_model)
     if s.llm_provider == "gemini":
-        from .gemini import GeminiProvider
+        from src.adapters.llm.gemini import GeminiProvider
 
         if not s.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY не задан")

@@ -1,11 +1,11 @@
-"""Реестр инструментов. Новый инструмент = новый файл + @tool(...)."""
+"""Реестр инструментов. Возможности (src/capabilities/*) регистрируют себя через @tool."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
 
-from ..llm.base import ToolSpec
+from src.core.messages import ToolSpec
 
 Risk = Literal["read", "write"]  # write = нужно подтверждение владельца
 
@@ -32,7 +32,3 @@ def tool(name: str, description: str, parameters: dict[str, Any] | None = None, 
 
 def specs() -> list[ToolSpec]:
     return [t.spec for t in REGISTRY.values()]
-
-
-# импорт модулей регистрирует инструменты
-from . import clock  # noqa: E402,F401

@@ -1,13 +1,13 @@
-"""Нейтральный формат сообщений и интерфейс провайдера.
+"""Нейтральный формат сообщений.
 
 Всё, что хранится в БД и ходит внутри приложения, живёт в этом формате.
-Адаптеры (claude.py, gemini.py) переводят его в формат конкретного API и обратно.
+Адаптеры LLM переводят его в формат конкретного API и обратно.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 
 @dataclass
@@ -38,11 +38,3 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict[str, Any]  # JSON Schema (type=object)
-
-
-class LLMProvider(Protocol):
-    async def chat(
-        self, system: str, messages: list[Message], tools: list[ToolSpec]
-    ) -> Message:
-        """Вернуть ответ ассистента (текст и/или вызовы инструментов)."""
-        ...

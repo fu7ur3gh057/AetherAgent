@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from . import tool
+from src.core.tools import tool
 
 
 @tool("current_time", "Текущие дата и время (UTC).")

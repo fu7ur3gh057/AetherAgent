@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # миграции при старте, затем бот
-CMD ["sh", "-c", "alembic upgrade head && python -m aether.main"]
+CMD ["sh", "-c", "alembic upgrade head && python -m src.app.main"]
