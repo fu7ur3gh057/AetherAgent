@@ -9,7 +9,7 @@ from src.adapters.channels.telegram.commands import register_commands
 from src.adapters.channels.telegram.confirmer import TelegramConfirmer
 from src.adapters.channels.telegram.notifier import TelegramNotifier
 from src.adapters.storage.postgres.store import PostgresStore
-from src.app import digest
+from src.app import backup_watch, digest
 from src.app.config import get_settings
 from src.app.reminders import ReminderService
 from src.app.scheduler import DailyJob, Scheduler
@@ -76,6 +76,20 @@ async def main():
             log.info("утренняя сводка: %s %s, дни %s", at.strftime("%H:%M"), tz, sorted(s.digest_weekdays))
         else:
             log.warning("DIGEST_TIME задан, но Gmail не подключён: сводка выключена")
+
+    check_at = s.backup_check_at
+    if check_at is not None:
+        watch = Scheduler(store, tz)
+        watch.add(
+            DailyJob(
+                name="backup_check",
+                at=check_at,
+                weekdays=set(range(1, 8)),
+                run=partial(backup_watch.run_check, notifier, s.allowed_ids, s.backup_dir, s.backup_max_age_hours),
+            )
+        )
+        tasks.append(asyncio.create_task(watch.run_forever()))
+        log.info("контроль бэкапов: %s %s, каталог %s", check_at.strftime("%H:%M"), tz, s.backup_dir)
 
     await register_commands(bot, s.allowed_ids)
     try:

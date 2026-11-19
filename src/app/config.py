@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     whisper_cpu_threads: int = 2
     whisper_model_dir: Path = ROOT / "data" / "whisper"
 
+
+    # Контроль резервных копий БД: проверка раз в день в BACKUP_CHECK_TIME (HH:MM в TIMEZONE), пусто = выключено
+    backup_check_time: str = "09:00"
+    backup_max_age_hours: float = 36
+    backup_dir: Path = ROOT / "data" / "backups"
+
     system_prompt_path: Path = ROOT / "src" / "prompts" / "system.md"
 
     @property
@@ -65,6 +71,15 @@ class Settings(BaseSettings):
             return time.fromisoformat(self.digest_time.strip())
         except ValueError:
             raise SystemExit("DIGEST_TIME должен быть в формате HH:MM, например 08:30") from None
+
+    @property
+    def backup_check_at(self) -> time | None:
+        if not self.backup_check_time.strip():
+            return None
+        try:
+            return time.fromisoformat(self.backup_check_time.strip())
+        except ValueError:
+            raise SystemExit("BACKUP_CHECK_TIME должен быть в формате HH:MM, например 09:00") from None
 
     @property
     def digest_weekdays(self) -> set[int]:

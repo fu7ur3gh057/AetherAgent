@@ -1,0 +1,222 @@
+---
+# Резервные копии БД Aether. Запускай через ./deploy.sh backup-*
+#   setup   — скрипт + ежедневный systemd-таймер на сервере (03:15 по времени сервера, хранит 14 копий)
+#   now     — сделать копию прямо сейчас (-e label=pre-migration; копии с меткой не ротируются)
+#   pull    — скачать на мак последнюю копию в ~/aether-backups (копия на том же сервере не защищает от его потери)
+#   status  — список копий, таймер, последние запуски
+#   restore — восстановить: -e file=<имя на сервере> | -e local=<путь на маке> -e confirm=yes
+- name: Aether DB backup
+  hosts: prod
+  gather_facts: false
+  vars:
+    aether_root: /opt/aether
+    compose_file: "{{ aether_root }}/docker-compose.yml"
+    backup_dir: "{{ aether_root }}/data/backups"
+    container: aether_postgres
+    keep: 14
+    label: ""
+    file: ""
+    local: ""
+    confirm: "no"
+    local_dir: "{{ lookup('env', 'HOME') }}/aether-backups"
+
+  tasks:
+    - name: Setup | каталог копий (только root)
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0700"
+      tags: [setup, never]
+
+    - name: Setup | скрипт aether-backup
+      ansible.builtin.copy:
+        src: files/aether-backup.sh
+        dest: /usr/local/bin/aether-backup
+        mode: "0755"
+      tags: [setup, never]
+
+    - name: Setup | systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/aether-backup.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Aether: резервная копия БД
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          Environment=BACKUP_DIR={{ backup_dir }}
+          Environment=KEEP={{ keep }}
+          Environment=CONTAINER={{ container }}
+          ExecStart=/usr/local/bin/aether-backup
+      tags: [setup, never]
+
+    - name: Setup | systemd timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/aether-backup.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Aether: ежедневная резервная копия БД
+
+          [Timer]
+          OnCalendar=*-*-* 03:15:00
+          RandomizedDelaySec=10min
+          # если сервер был выключен в момент запуска, копия сделается при включении
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      tags: [setup, never]
+
+    - name: Setup | включить таймер
+      ansible.builtin.systemd:
+        name: aether-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags: [setup, never]
+
+    - name: Setup | первая копия сразу, чтобы убедиться, что всё работает
+      ansible.builtin.command: /usr/local/bin/aether-backup
+      environment:
+        BACKUP_DIR: "{{ backup_dir }}"
+        KEEP: "{{ keep }}"
+      register: first
+      tags: [setup, never]
+
+    - ansible.builtin.debug:
+        var: first.stdout_lines
+      tags: [setup, never]
+
+    - name: Now | сделать копию
+      ansible.builtin.command: "/usr/local/bin/aether-backup {{ label }}"
+      environment:
+        BACKUP_DIR: "{{ backup_dir }}"
+        KEEP: "{{ keep }}"
+      register: dump
+      tags: [now, never]
+
+    - ansible.builtin.debug:
+        var: dump.stdout_lines
+      tags: [now, never]
+
+    - name: Pull | найти последнюю копию на сервере
+      ansible.builtin.shell: "ls -1t {{ backup_dir }}/aether-*.dump | head -1"
+      register: latest
+      changed_when: false
+      tags: [pull, never]
+
+    - name: Pull | каталог на маке (только владелец)
+      ansible.builtin.file:
+        path: "{{ local_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      tags: [pull, never]
+
+    - name: Pull | скачать на мак
+      ansible.builtin.fetch:
+        src: "{{ latest.stdout | trim }}"
+        dest: "{{ local_dir }}/"
+        flat: true
+      register: fetched
+      tags: [pull, never]
+
+    - ansible.builtin.debug:
+        msg: "Скачано: {{ fetched.dest }}"
+      tags: [pull, never]
+
+    - name: Status | копии, таймер, последние запуски
+      ansible.builtin.shell: |
+        echo "== копии ({{ backup_dir }})"; ls -lh --time-style=long-iso {{ backup_dir }} | tail -n +2
+        echo; echo "== таймер"; systemctl list-timers aether-backup.timer --no-pager | head -3
+        echo; echo "== последние запуски"; journalctl -u aether-backup.service -n 6 --no-pager 2>/dev/null | tail -6
+      register: status
+      changed_when: false
+      tags: [status, never]
+
+    - ansible.builtin.debug:
+        msg: "{{ status.stdout_lines }}"
+      tags: [status, never]
+
+    - name: Restore | проверки перед опасной операцией
+      ansible.builtin.assert:
+        that:
+          - confirm == 'yes'
+          - (file | length > 0) != (local | length > 0)
+        fail_msg: >-
+          Восстановление ЗАМЕНЯЕТ данные БД. Укажи ровно одно из -e file=<имя на сервере> или -e local=<путь на маке>
+          и подтверди -e confirm=yes
+      delegate_to: localhost
+      tags: [restore, never]
+
+    - name: Restore | загрузить копию с мака на сервер
+      ansible.builtin.copy:
+        src: "{{ local }}"
+        dest: "{{ backup_dir }}/uploaded-{{ local | basename }}"
+        mode: "0600"
+      when: local | length > 0
+      tags: [restore, never]
+
+    - name: Restore | путь к копии
+      ansible.builtin.set_fact:
+        dump_path: "{{ backup_dir }}/uploaded-{{ local | basename }}"
+      when: local | length > 0
+      tags: [restore, never]
+
+    - name: Restore | путь к копии на сервере
+      ansible.builtin.set_fact:
+        dump_path: "{{ backup_dir }}/{{ file | basename }}"
+      when: file | length > 0
+      tags: [restore, never]
+
+    - name: Restore | копия существует
+      ansible.builtin.stat:
+        path: "{{ dump_path }}"
+      register: dumpstat
+      tags: [restore, never]
+
+    - ansible.builtin.assert:
+        that: dumpstat.stat.exists and dumpstat.stat.size > 0
+        fail_msg: "Нет файла {{ dump_path }}"
+      tags: [restore, never]
+
+    - name: "Restore | восстановление (перед ним автоматически делается копия pre-restore)"
+      block:
+        - name: Страховочная копия текущей БД (pre-restore)
+          ansible.builtin.command: /usr/local/bin/aether-backup pre-restore
+          environment:
+            BACKUP_DIR: "{{ backup_dir }}"
+          register: safety
+
+        - ansible.builtin.debug:
+            var: safety.stdout_lines
+
+        - name: Остановить бота (чтобы никто не писал в БД во время восстановления)
+          ansible.builtin.command: docker compose -f {{ compose_file }} stop bot
+
+        - name: pg_restore
+          ansible.builtin.shell: >-
+            docker exec -i {{ container }} sh -c
+            'pg_restore --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+            < {{ dump_path }}
+
+        - name: Запустить бота (миграции применятся при старте)
+          ansible.builtin.command: docker compose -f {{ compose_file }} up -d bot
+
+        - name: Ждать healthcheck
+          ansible.builtin.command: docker inspect -f '{{ '{{' }}.State.Health.Status{{ '}}' }}' aether_bot
+          register: health
+          until: health.stdout | trim == 'healthy'
+          retries: 30
+          delay: 5
+          changed_when: false
+      rescue:
+        - ansible.builtin.fail:
+            msg: >-
+              Восстановление не завершилось. Бот ОСТАНОВЛЕН. Состояние до операции сохранено в копии pre-restore
+              ({{ backup_dir }}). Разберись с ошибкой выше и повтори, либо верни прежние данные тем же restore с -e file=<pre-restore>.
+      tags: [restore, never]
