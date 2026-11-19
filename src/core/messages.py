@@ -53,6 +53,16 @@ class MemoryItem:
 
 
 @dataclass
+class Reminder:
+    id: int
+    chat_id: int
+    text: str
+    remind_at: datetime  # UTC
+    repeat: str | None = None  # None | daily | weekdays | weekly
+    status: str = "pending"  # pending | sent | cancelled | failed
+
+
+@dataclass
 class ToolSpec:
     name: str
     description: str

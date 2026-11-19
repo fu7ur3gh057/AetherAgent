@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.adapters.storage.postgres.models import JobRunRow, MemoryRow, MessageRow
-from src.core.messages import HistoryItem, MemoryItem, Message, ToolCall, ToolResult
+from src.adapters.storage.postgres.models import JobRunRow, MemoryRow, MessageRow, ReminderRow
+from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolCall, ToolResult
+
+
+def _reminder(r: ReminderRow) -> Reminder:
+    return Reminder(r.id, r.chat_id, r.text, r.remind_at, r.repeat, r.status)
 
 
 def _to_row(chat_id: int, m: Message) -> MessageRow:
@@ -147,6 +151,91 @@ class PostgresStore:
         async with self.session() as s:
             await s.execute(delete(JobRunRow).where(JobRunRow.job_name == job_name, JobRunRow.run_date == run_date))
             await s.commit()
+
+    # ---- напоминания
+
+    async def add_reminder(
+        self, chat_id: int, text: str, remind_at: datetime, repeat: str | None, max_pending: int
+    ) -> int:
+        async with self.session() as s:
+            count = await s.scalar(
+                select(func.count()).select_from(ReminderRow).where(
+                    ReminderRow.chat_id == chat_id, ReminderRow.status == "pending"
+                )
+            )
+            if (count or 0) >= max_pending:
+                raise ValueError(f"Слишком много активных напоминаний ({max_pending}): отмени лишние через /reminders")
+            row = ReminderRow(chat_id=chat_id, text=text, remind_at=remind_at, repeat=repeat)
+            s.add(row)
+            await s.commit()
+            return row.id
+
+    async def list_reminders(self, chat_id: int) -> list[Reminder]:
+        q = (
+            select(ReminderRow)
+            .where(ReminderRow.chat_id == chat_id, ReminderRow.status == "pending")
+            .order_by(ReminderRow.remind_at, ReminderRow.id)
+        )
+        async with self.session() as s:
+            return [_reminder(r) for r in (await s.scalars(q)).all()]
+
+    async def get_reminder(self, chat_id: int, reminder_id: int) -> Reminder | None:
+        async with self.session() as s:
+            r = await s.scalar(
+                select(ReminderRow).where(ReminderRow.chat_id == chat_id, ReminderRow.id == reminder_id)
+            )
+        return _reminder(r) if r else None
+
+    async def cancel_reminder(self, chat_id: int, reminder_id: int) -> bool:
+        async with self.session() as s:
+            res = await s.execute(
+                update(ReminderRow)
+                .where(ReminderRow.chat_id == chat_id, ReminderRow.id == reminder_id, ReminderRow.status == "pending")
+                .values(status="cancelled")
+            )
+            await s.commit()
+        return res.rowcount > 0
+
+    async def due_reminders(self, now: datetime, limit: int) -> list[Reminder]:
+        q = (
+            select(ReminderRow)
+            .where(ReminderRow.status == "pending", ReminderRow.remind_at <= now)
+            .order_by(ReminderRow.remind_at)
+            .limit(limit)
+        )
+        async with self.session() as s:
+            return [_reminder(r) for r in (await s.scalars(q)).all()]
+
+    async def mark_reminder_sent(self, reminder_id: int) -> None:
+        async with self.session() as s:
+            await s.execute(
+                update(ReminderRow)
+                .where(ReminderRow.id == reminder_id)
+                .values(status="sent", sent_at=datetime.now(timezone.utc))
+            )
+            await s.commit()
+
+    async def reschedule_reminder(self, reminder_id: int, remind_at: datetime) -> None:
+        async with self.session() as s:
+            await s.execute(
+                update(ReminderRow)
+                .where(ReminderRow.id == reminder_id)
+                .values(remind_at=remind_at, fail_count=0, sent_at=datetime.now(timezone.utc))
+            )
+            await s.commit()
+
+    async def record_reminder_failure(self, reminder_id: int, max_failures: int) -> int:
+        async with self.session() as s:
+            n = await s.scalar(
+                update(ReminderRow)
+                .where(ReminderRow.id == reminder_id)
+                .values(fail_count=ReminderRow.fail_count + 1)
+                .returning(ReminderRow.fail_count)
+            )
+            if n is not None and n >= max_failures:
+                await s.execute(update(ReminderRow).where(ReminderRow.id == reminder_id).values(status="failed"))
+            await s.commit()
+        return n or 0
 
     async def close(self) -> None:
         await self._engine.dispose()

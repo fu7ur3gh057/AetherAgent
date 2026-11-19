@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.core.messages import HistoryItem, MemoryItem, Message, ToolSpec
+from datetime import datetime
+
+from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolSpec
 
 
 class LLMProvider(Protocol):
@@ -58,3 +60,31 @@ class MemoryStore(Protocol):
     async def get_memory(self, chat_id: int, memory_id: int) -> MemoryItem | None: ...
 
     async def delete_memory(self, chat_id: int, memory_id: int) -> bool: ...
+
+
+class ReminderStore(Protocol):
+    async def add_reminder(
+        self, chat_id: int, text: str, remind_at: datetime, repeat: str | None, max_pending: int
+    ) -> int:
+        """Создать напоминание. ValueError, если активных уже max_pending."""
+        ...
+
+    async def list_reminders(self, chat_id: int) -> list[Reminder]:
+        """Активные (pending) напоминания, ближайшие первыми."""
+        ...
+
+    async def get_reminder(self, chat_id: int, reminder_id: int) -> Reminder | None: ...
+
+    async def cancel_reminder(self, chat_id: int, reminder_id: int) -> bool: ...
+
+    async def due_reminders(self, now: datetime, limit: int) -> list[Reminder]:
+        """Активные напоминания, время которых наступило (по всем чатам)."""
+        ...
+
+    async def mark_reminder_sent(self, reminder_id: int) -> None: ...
+
+    async def reschedule_reminder(self, reminder_id: int, remind_at: datetime) -> None: ...
+
+    async def record_reminder_failure(self, reminder_id: int, max_failures: int) -> int:
+        """Увеличить счётчик неудач доставки; после max_failures статус failed. Возвращает счётчик."""
+        ...

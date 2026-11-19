@@ -133,6 +133,9 @@ class Agent:
 
         try:
             return ToolResult(call.id, await t.func(**call.args))
+        except ValueError as e:  # ожидаемая ошибка ввода (валидация): без трейсбэка, модель может поправить вызов
+            log.info("tool %s rejected input: %s", call.name, e)
+            return ToolResult(call.id, f"Ошибка: {e}", True)
         except Exception as e:  # ошибка инструмента не должна валить диалог
             log.exception("tool %s failed", call.name)
             return ToolResult(call.id, f"Ошибка: {e}", True)

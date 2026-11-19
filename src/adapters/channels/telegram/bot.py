@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timezone, tzinfo
+from datetime import datetime, timedelta, timezone, tzinfo
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatAction
@@ -12,6 +12,9 @@ from src.adapters.channels.telegram.confirmer import TelegramConfirmer, is_confi
 from src.adapters.channels.telegram.delivery import deliver
 from src.core.agent import Agent
 from src.core.messages import HistoryItem
+from src.core.ports import ReminderStore
+from src.core.recurrence import REPEAT_LABELS
+from src.core.timefmt import fmt_local
 
 log = logging.getLogger(__name__)
 TG_LIMIT = 4096
@@ -50,6 +53,7 @@ def build_dispatcher(
     allowed_ids: set[int],
     confirmer: TelegramConfirmer | None = None,
     tz: tzinfo = timezone.utc,
+    reminders: ReminderStore | None = None,
 ) -> Dispatcher:
     router = Router()
     # доступ только владельцу; остальным бот молчит (и на сообщения, и на нажатия кнопок)
@@ -62,12 +66,68 @@ def build_dispatcher(
         async def on_confirmation(cb: CallbackQuery):
             await confirmer.on_callback(cb)
 
+    if reminders is not None:
+
+        @router.callback_query(F.data.startswith("rm:"))
+        async def on_reminder_button(cb: CallbackQuery):
+            parts = (cb.data or "").split(":")
+            chat_id = cb.message.chat.id if cb.message else None
+            try:
+                action, rid = parts[1], int(parts[2])
+            except (IndexError, ValueError):
+                await cb.answer()
+                return
+            note = None
+            if action == "s" and len(parts) == 4 and parts[3] in ("10", "60") and chat_id is not None:
+                r = await reminders.get_reminder(chat_id, rid)
+                if r is None:
+                    await cb.answer("Напоминание не найдено", show_alert=True)
+                    return
+                at = datetime.now(timezone.utc) + timedelta(minutes=int(parts[3]))
+                try:
+                    await reminders.add_reminder(chat_id, r.text, at, None, 100)
+                except ValueError as e:
+                    await cb.answer(str(e), show_alert=True)
+                    return
+                note = f"⏱ Отложено до {fmt_local(at, tz)}"
+            elif action == "ok":
+                note = "✅ Принято"
+            if note and cb.message:
+                try:  # убираем кнопки и дописываем результат
+                    await cb.message.edit_text(f"{cb.message.text}\n\n{note}", reply_markup=None)
+                except Exception:
+                    log.warning("could not update reminder message", exc_info=True)
+            await cb.answer()
+
+        @router.message(Command("reminders"))
+        async def list_reminders(m: Message):
+            items = await reminders.list_reminders(m.chat.id)
+            if not items:
+                await m.answer("⏰ Активных напоминаний нет. Скажи «напомни завтра в 10 позвонить Руслану».")
+                return
+            lines = []
+            for r in items:
+                rep = f" 🔁 {REPEAT_LABELS[r.repeat]}" if r.repeat else ""
+                lines.append(f"#{r.id} · {fmt_local(r.remind_at, tz)}{rep}\n{r.text}")
+            for part in _chunks("⏰ Напоминания:\n\n" + "\n\n".join(lines)):
+                await m.answer(part, parse_mode=None)
+
+        @router.message(Command("cancel"))
+        async def cancel_reminder(m: Message, command: CommandObject):
+            arg = (command.args or "").strip().lstrip("#")
+            if not arg.isdigit():
+                await m.answer("🗑 Использование: /cancel N (номер из /reminders)")
+                return
+            ok = await reminders.cancel_reminder(m.chat.id, int(arg))
+            await m.answer("🗑 Напоминание отменено." if ok else "🤷 Активного напоминания с таким номером нет.")
+
     @router.message(Command("start"))
     async def start(m: Message):
         await m.answer(
             "👋 Aether на связи. Пиши вопрос или просьбу, например «что в почте?».\n\n"
             "🕘 /history [N] — последние реплики\n"
             "🔎 /search слово — поиск по истории\n"
+            "⏰ /reminders — активные напоминания\n"
             "🧠 /memory — что я о тебе помню\n"
             "🗑 /forget N — забыть заметку\n"
             "🧹 /reset — очистить историю"
