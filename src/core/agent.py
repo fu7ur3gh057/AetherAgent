@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from src.core.messages import HistoryItem, Message, ToolCall, ToolResult
 from src.core.ports import Confirmer, LLMProvider, MessageStore
@@ -42,7 +43,7 @@ class Agent:
         reply = ""
 
         for _ in range(MAX_STEPS):
-            resp = await self.llm.chat(self.system_prompt, history + new, specs())
+            resp = await self.llm.chat(self._system(), history + new, specs())
             new.append(resp)
             if not resp.tool_calls:
                 reply = resp.text
@@ -55,6 +56,11 @@ class Agent:
 
         await self.store.add(chat_id, new)
         return reply or "(пустой ответ)"
+
+    def _system(self) -> str:
+        # модель не знает текущей даты; нужна для «сегодня/вчера» и расчёта сроков
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC, %A")
+        return f"{self.system_prompt}\n\nСейчас: {now}."
 
     async def reset(self, chat_id: int) -> None:
         async with self._locks[chat_id]:

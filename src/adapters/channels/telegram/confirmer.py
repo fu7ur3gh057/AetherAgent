@@ -28,7 +28,7 @@ class TelegramConfirmer:
         fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         self._pending[token] = (chat_id, fut)
 
-        text = f"Подтвердить действие?\n\n{description}"[: TG_LIMIT - 50]
+        text = f"🔐 Подтвердить действие?\n\n{description}"[: TG_LIMIT - 50]
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -40,7 +40,7 @@ class TelegramConfirmer:
         msg = await self._bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None)
         try:
             approved = await asyncio.wait_for(fut, self._timeout)
-            verdict = "✅ Подтверждено" if approved else "❌ Отклонено"
+            verdict = "✅ Подтверждено" if approved else "🚫 Отклонено"
         except asyncio.TimeoutError:
             approved, verdict = False, "⌛ Время вышло, действие отклонено"
         finally:

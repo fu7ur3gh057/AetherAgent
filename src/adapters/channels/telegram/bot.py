@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.enums import ChatAction
+from aiogram.enums import ChatAction, ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from src.adapters.channels.telegram.confirmer import TelegramConfirmer, is_confirmation
+from src.adapters.channels.telegram.format import md_to_html, split_text
 from src.core.agent import Agent
 from src.core.messages import HistoryItem
 
@@ -23,11 +25,25 @@ def _chunks(text: str, size: int = TG_LIMIT):
 
 
 def _fmt(item: HistoryItem) -> str:
-    who = "Я" if item.role == "user" else "Aether"
+    who = "🧑 Я" if item.role == "user" else "🤖 Aether"
     text = " ".join(item.text.split())
     if len(text) > SNIPPET:
         text = text[:SNIPPET] + "…"
-    return f"{item.created_at:%d.%m %H:%M} {who}: {text}"  # время в UTC
+    return f"🕐 {item.created_at:%d.%m %H:%M} · {who}\n{text}"  # время в UTC
+
+
+async def send_formatted(m: Message, text: str) -> None:
+    """Ответ модели: Markdown -> HTML Telegram; если Telegram не принял разметку, шлём простым текстом."""
+    for chunk in split_text(text):
+        try:
+            await m.answer(
+                md_to_html(chunk),
+                parse_mode=ParseMode.HTML,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        except TelegramBadRequest:
+            log.warning("HTML rejected by Telegram, falling back to plain text")
+            await m.answer(chunk, parse_mode=None)
 
 
 async def _send_items(m: Message, items: list[HistoryItem], empty: str) -> None:
@@ -55,30 +71,30 @@ def build_dispatcher(
     @router.message(Command("start"))
     async def start(m: Message):
         await m.answer(
-            "Aether на связи. Пиши вопрос.\n"
-            "/history [N] — последние реплики\n"
-            "/search слово — поиск по истории\n"
-            "/reset — очистить историю"
+            "👋 Aether на связи. Пиши вопрос или просьбу, например «что в почте?».\n\n"
+            "🕘 /history [N] — последние реплики\n"
+            "🔎 /search слово — поиск по истории\n"
+            "🧹 /reset — очистить историю"
         )
 
     @router.message(Command("reset"))
     async def reset(m: Message):
         await agent.reset(m.chat.id)
-        await m.answer("История очищена.")
+        await m.answer("🧹 История очищена.")
 
     @router.message(Command("history"))
     async def history(m: Message, command: CommandObject):
         n = int(command.args) if command.args and command.args.strip().isdigit() else 10
         items = await agent.recent(m.chat.id, max(1, min(n, MAX_LIST)))
-        await _send_items(m, items, "История пуста.")
+        await _send_items(m, items, "📭 История пуста.")
 
     @router.message(Command("search"))
     async def search(m: Message, command: CommandObject):
         if not command.args or not command.args.strip():
-            await m.answer("Использование: /search слово")
+            await m.answer("🔎 Использование: /search слово")
             return
         items = await agent.search(m.chat.id, command.args.strip(), MAX_LIST)
-        await _send_items(m, items, "Ничего не найдено.")
+        await _send_items(m, items, "🔍 Ничего не найдено.")
 
     @router.message(F.text)
     async def on_text(m: Message):
@@ -87,9 +103,8 @@ def build_dispatcher(
             reply = await agent.handle(m.chat.id, m.text)
         except Exception:
             log.exception("agent failed")
-            reply = "Что-то пошло не так, смотри логи."
-        for part in _chunks(reply):
-            await m.answer(part, parse_mode=None)
+            reply = "⚠️ Что-то пошло не так, смотри логи."
+        await send_formatted(m, reply)
 
     # всё, что прошло мимо владельца: молча игнорируем, но фиксируем в логе (без текста сообщения)
     guard = Router()
