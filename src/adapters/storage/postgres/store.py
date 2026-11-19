@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.adapters.storage.postgres.models import JobRunRow, LlmUsageRow, MemoryRow, MessageRow, ReminderRow
-from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolCall, ToolResult, UsageRow
+from src.adapters.storage.postgres.models import (JobRunRow, LlmUsageRow, MemoryRow, MessageRow, ReminderRow,
+                                                      WatcherRow)
+from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolCall, ToolResult, UsageRow, Watcher
 
 
 def _reminder(r: ReminderRow) -> Reminder:
     return Reminder(r.id, r.chat_id, r.text, r.remind_at, r.repeat, r.status)
+
+
+def _watcher(r: WatcherRow) -> Watcher:
+    return Watcher(r.id, r.chat_id, r.title, r.query, r.condition, r.once, r.interval_minutes, r.daily_at,
+                   r.next_run_at, r.status, r.last_summary, r.last_checked_at, r.last_notified_at)
 
 
 def _to_row(chat_id: int, m: Message) -> MessageRow:
@@ -269,6 +275,76 @@ class PostgresStore:
         async with self.session() as s:
             rows = (await s.scalars(q)).all()
         return [UsageRow(r.day, r.model, r.input_tokens, r.output_tokens, r.calls) for r in rows]
+
+    # ---- наблюдатели
+
+    async def add_watcher(
+        self, chat_id: int, title: str, query: str, condition: str, once: bool,
+        interval_minutes: int | None, daily_at: time | None, next_run_at: datetime, max_active: int,
+    ) -> int:
+        async with self.session() as s:
+            count = await s.scalar(
+                select(func.count()).select_from(WatcherRow).where(
+                    WatcherRow.chat_id == chat_id, WatcherRow.status.in_(("active", "paused"))
+                )
+            )
+            if (count or 0) >= max_active:
+                raise ValueError(f"Слишком много наблюдателей ({max_active}): удали лишние через /watchers и /unwatch")
+            row = WatcherRow(chat_id=chat_id, title=title, query=query, condition=condition, once=once,
+                             interval_minutes=interval_minutes, daily_at=daily_at, next_run_at=next_run_at)
+            s.add(row)
+            await s.commit()
+            return row.id
+
+    async def list_watchers(self, chat_id: int) -> list[Watcher]:
+        q = select(WatcherRow).where(WatcherRow.chat_id == chat_id, WatcherRow.status.in_(("active", "paused"))).order_by(WatcherRow.id)
+        async with self.session() as s:
+            return [_watcher(r) for r in (await s.scalars(q)).all()]
+
+    async def get_watcher(self, chat_id: int, watcher_id: int) -> Watcher | None:
+        async with self.session() as s:
+            r = await s.scalar(select(WatcherRow).where(WatcherRow.chat_id == chat_id, WatcherRow.id == watcher_id))
+        return _watcher(r) if r else None
+
+    async def cancel_watcher(self, chat_id: int, watcher_id: int) -> bool:
+        async with self.session() as s:
+            res = await s.execute(
+                update(WatcherRow)
+                .where(WatcherRow.chat_id == chat_id, WatcherRow.id == watcher_id, WatcherRow.status.in_(("active", "paused")))
+                .values(status="cancelled")
+            )
+            await s.commit()
+        return res.rowcount > 0
+
+    async def due_watchers(self, now: datetime, limit: int) -> list[Watcher]:
+        q = select(WatcherRow).where(WatcherRow.status == "active", WatcherRow.next_run_at <= now).order_by(WatcherRow.next_run_at).limit(limit)
+        async with self.session() as s:
+            return [_watcher(r) for r in (await s.scalars(q)).all()]
+
+    async def finish_watch_check(
+        self, watcher_id: int, *, next_run_at: datetime, last_summary: str | None, checked_at: datetime,
+        notified_at: datetime | None, done: bool,
+    ) -> None:
+        values = dict(next_run_at=next_run_at, last_summary=last_summary, last_checked_at=checked_at, fail_count=0)
+        if notified_at is not None:
+            values["last_notified_at"] = notified_at
+        if done:
+            values["status"] = "done"
+        async with self.session() as s:
+            # завершённого или отменённого наблюдателя не «оживляем»: между проверкой и записью его могли отменить
+            await s.execute(update(WatcherRow).where(WatcherRow.id == watcher_id, WatcherRow.status == "active").values(**values))
+            await s.commit()
+
+    async def record_watcher_failure(self, watcher_id: int, max_failures: int, retry_at: datetime) -> int:
+        async with self.session() as s:
+            n = await s.scalar(
+                update(WatcherRow).where(WatcherRow.id == watcher_id)
+                .values(fail_count=WatcherRow.fail_count + 1, next_run_at=retry_at).returning(WatcherRow.fail_count)
+            )
+            if n is not None and n >= max_failures:
+                await s.execute(update(WatcherRow).where(WatcherRow.id == watcher_id, WatcherRow.status == "active").values(status="paused"))
+            await s.commit()
+        return n or 0
 
     async def close(self) -> None:
         await self._engine.dispose()

@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolSpec, UsageRow
+from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolSpec, UsageRow, Watcher
 
 
 class LLMProvider(Protocol):
@@ -107,4 +107,36 @@ class UsageStore(Protocol):
 
     async def usage_since(self, since: date) -> list[UsageRow]:
         """Строки счётчика начиная с даты (включительно)."""
+        ...
+
+
+class WatcherStore(Protocol):
+    async def add_watcher(
+        self, chat_id: int, title: str, query: str, condition: str, once: bool,
+        interval_minutes: int | None, daily_at: time | None, next_run_at: datetime, max_active: int,
+    ) -> int:
+        """Создать наблюдателя. ValueError, если активных уже max_active."""
+        ...
+
+    async def list_watchers(self, chat_id: int) -> list[Watcher]:
+        """Активные и приостановленные, по номеру."""
+        ...
+
+    async def get_watcher(self, chat_id: int, watcher_id: int) -> Watcher | None: ...
+
+    async def cancel_watcher(self, chat_id: int, watcher_id: int) -> bool: ...
+
+    async def due_watchers(self, now: datetime, limit: int) -> list[Watcher]:
+        """Активные, чья проверка пора (по всем чатам)."""
+        ...
+
+    async def finish_watch_check(
+        self, watcher_id: int, *, next_run_at: datetime, last_summary: str | None, checked_at: datetime,
+        notified_at: datetime | None, done: bool,
+    ) -> None:
+        """Записать итог проверки: время следующей, что видели, уведомляли ли; done = завершить наблюдателя."""
+        ...
+
+    async def record_watcher_failure(self, watcher_id: int, max_failures: int, retry_at: datetime) -> int:
+        """Сбой проверки: счётчик +1, следующая попытка retry_at; после max_failures подряд наблюдатель приостанавливается."""
         ...

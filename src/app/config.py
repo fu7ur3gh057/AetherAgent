@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     web_search_model: str = ""  # по умолчанию GEMINI_MODEL
     web_search_daily_limit: int = 50
 
+
+    # Наблюдатели (нужен веб-поиск). Дневной лимит проверок всех наблюдателей: 0 = без лимита
+    watchers_enabled: bool = True
+    watcher_daily_checks: int = 40
+    watcher_max_active: int = 10
+
     system_prompt_path: Path = ROOT / "src" / "prompts" / "system.md"
 
     @property

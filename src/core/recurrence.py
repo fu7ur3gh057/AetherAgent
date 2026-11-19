@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import datetime, time, timedelta, timezone, tzinfo
 
 REPEATS = ("daily", "weekdays", "weekly")
 REPEAT_LABELS = {"daily": "каждый день", "weekdays": "по будням", "weekly": "каждую неделю"}
@@ -28,3 +28,17 @@ def next_after(remind_at: datetime, repeat: str, tz: tzinfo, now: datetime) -> d
         if candidate > now:
             return candidate
     raise ValueError("Не удалось вычислить следующее повторение")
+
+
+def next_watch_run(now: datetime, interval_minutes: int | None, daily_at: time | None, tz: tzinfo) -> datetime:
+    """Следующая проверка наблюдателя (UTC): через interval_minutes либо ближайшее daily_at по часам владельца."""
+    if interval_minutes:
+        return now + timedelta(minutes=interval_minutes)
+    if daily_at is None:
+        raise ValueError("Не задано расписание наблюдателя")
+    local_now = now.astimezone(tz)
+    for add in range(0, 3):
+        cand = datetime.combine(local_now.date() + timedelta(days=add), daily_at, tzinfo=tz).astimezone(timezone.utc)
+        if cand > now:
+            return cand
+    raise ValueError("Не удалось вычислить время проверки")

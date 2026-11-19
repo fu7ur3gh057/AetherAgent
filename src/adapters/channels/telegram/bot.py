@@ -16,9 +16,9 @@ from src.adapters.channels.telegram.confirmer import TelegramConfirmer, is_confi
 from src.adapters.channels.telegram.delivery import deliver
 from src.core.agent import Agent
 from src.core.messages import Attachment, HistoryItem
-from src.core.ports import ReminderStore, Transcriber
+from src.core.ports import ReminderStore, Transcriber, WatcherStore
 from src.core.recurrence import REPEAT_LABELS
-from src.core.timefmt import fmt_local
+from src.core.timefmt import fmt_local, fmt_schedule
 
 log = logging.getLogger(__name__)
 TG_LIMIT = 4096
@@ -86,6 +86,7 @@ def build_dispatcher(
     reminders: ReminderStore | None = None,
     transcriber: Transcriber | None = None,
     voice_max_seconds: int = 300,
+    watchers: WatcherStore | None = None,
 ) -> Dispatcher:
     router = Router()
     # доступ только владельцу; остальным бот молчит (и на сообщения, и на нажатия кнопок)
@@ -153,6 +154,51 @@ def build_dispatcher(
             ok = await reminders.cancel_reminder(m.chat.id, int(arg))
             await m.answer("🗑 Напоминание отменено." if ok else "🤷 Активного напоминания с таким номером нет.")
 
+    if watchers is not None:
+
+        @router.callback_query(F.data.startswith("wt:"))
+        async def on_watch_button(cb: CallbackQuery):
+            parts = (cb.data or "").split(":")
+            chat_id = cb.message.chat.id if cb.message else None
+            try:
+                action, wid = parts[1], int(parts[2])
+            except (IndexError, ValueError):
+                await cb.answer()
+                return
+            if action == "off" and chat_id is not None:
+                ok = await watchers.cancel_watcher(chat_id, wid)
+                note = "🔕 Наблюдатель отключён" if ok else "ℹ️ Этот наблюдатель уже отключён"
+                if cb.message:
+                    try:
+                        await cb.message.edit_text(f"{cb.message.text}\n\n{note}", reply_markup=None)
+                    except Exception:
+                        log.warning("could not update watcher message", exc_info=True)
+            await cb.answer()
+
+        @router.message(Command("watchers"))
+        async def list_watchers(m: Message):
+            items = await watchers.list_watchers(m.chat.id)
+            if not items:
+                await m.answer("🔭 Наблюдателей нет. Скажи, например: «следи за курсом доллара и напиши, если выше 1,75».")
+                return
+            lines = []
+            for w in items:
+                state = "⏸ приостановлен" if w.status == "paused" else "▶️"
+                once = ", один раз" if w.once else ""
+                last = f"\nпоследняя проверка: {fmt_local(w.last_checked_at, tz)}" if w.last_checked_at else "\nещё не проверялся"
+                lines.append(f"#{w.id} {state} «{w.title}»\n{fmt_schedule(w.interval_minutes, w.daily_at)}{once}{last}\nуведомлю, когда: {w.condition}")
+            for part in _chunks("🔭 Наблюдатели:\n\n" + "\n\n".join(lines)):
+                await m.answer(part, parse_mode=None)
+
+        @router.message(Command("unwatch"))
+        async def unwatch(m: Message, command: CommandObject):
+            arg = (command.args or "").strip().lstrip("#")
+            if not arg.isdigit():
+                await m.answer("🔕 Использование: /unwatch N (номер из /watchers)")
+                return
+            ok = await watchers.cancel_watcher(m.chat.id, int(arg))
+            await m.answer("🔕 Наблюдатель отключён." if ok else "🤷 Такого наблюдателя нет.")
+
     @router.message(Command("start"))
     async def start(m: Message):
         await m.answer(
@@ -160,6 +206,7 @@ def build_dispatcher(
             "🕘 /history [N] — последние реплики\n"
             "🔎 /search слово — поиск по истории\n"
             "⏰ /reminders — активные напоминания\n"
+            "🔭 /watchers — наблюдатели\n"
             "🧠 /memory — что я о тебе помню\n"
             "📊 /usage — расход токенов\n"
             "🗑 /forget N — забыть заметку\n"

@@ -7,7 +7,7 @@
 import logging
 from datetime import timezone, tzinfo
 
-from src.core.ports import MemoryStore, ReminderStore
+from src.core.ports import MemoryStore, ReminderStore, WatcherStore
 
 log = logging.getLogger(__name__)
 
@@ -17,6 +17,8 @@ def load_all(
     reminder_store: ReminderStore | None = None,
     tz: tzinfo = timezone.utc,
     web_search: tuple[str, str, int] | None = None,  # (ключ Gemini, модель, дневной лимит поисков)
+    watcher_store: WatcherStore | None = None,
+    watcher_max_active: int = 10,
 ) -> None:
     from src.capabilities import clock  # noqa: F401
 
@@ -52,3 +54,10 @@ def load_all(
         log.info("capability web_search: включена (лимит %s/день)", web_search[2] or "нет")
     else:
         log.info("capability web_search: выключена (нужен GEMINI_API_KEY и WEB_SEARCH_ENABLED=true)")
+
+    # наблюдатели ищут через web_search, поэтому без него не включаются
+    if watcher_store is not None and web_search is not None:
+        from src.capabilities import watchers
+
+        watchers.register(watcher_store, tz, watcher_max_active)
+        log.info("capability watchers: включена")

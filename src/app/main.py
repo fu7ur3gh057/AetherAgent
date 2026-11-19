@@ -13,6 +13,7 @@ from src.app import backup_watch, digest, health
 from src.app.config import get_settings
 from src.app.reminders import ReminderService
 from src.app.scheduler import DailyJob, Scheduler
+from src.app.watchers import WatcherService
 from src.app.wiring import make_provider, make_transcriber
 from src.core import alerts
 from src.core.agent import Agent
@@ -43,7 +44,7 @@ async def _startup_notice(s, transcriber, notifier) -> None:
         f"Модель: {s.llm_provider}",
         f"Голосовые: {type(transcriber).__name__ if transcriber else 'выключены'}",
         f"Gmail: {'вкл' if 'gmail_unread' in REGISTRY else 'выкл'} · отправка: {'вкл' if 'gmail_send' in REGISTRY else 'выкл'}",
-        f"Поиск в интернете: {'вкл' if 'web_search' in REGISTRY else 'выкл'}",
+        f"Поиск в интернете: {'вкл' if 'web_search' in REGISTRY else 'выкл'} · ссылки: {'вкл' if 'read_url' in REGISTRY else 'выкл'} · наблюдатели: {'вкл' if 'watch_create' in REGISTRY else 'выкл'}",
         f"Сводка: {s.digest_time or 'выкл'} · лимит токенов: {s.daily_token_limit or 'нет'}",
     ]
     for chat_id in sorted(s.allowed_ids):
@@ -64,18 +65,22 @@ async def main():
     search = None
     if s.web_search_enabled and s.gemini_api_key:
         search = (s.gemini_api_key, s.web_search_model or s.gemini_model, s.web_search_daily_limit)
-    capabilities.load_all(memory_store=store, reminder_store=store, tz=tz, web_search=search)
+    capabilities.load_all(
+        memory_store=store, reminder_store=store, tz=tz, web_search=search,
+        watcher_store=store if s.watchers_enabled else None, watcher_max_active=s.watcher_max_active,
+    )
     bot = make_bot(s.telegram_bot_token)
     confirmer = TelegramConfirmer(bot)
+    llm = make_provider(s)
     agent = Agent(
-        make_provider(s), store, s.system_prompt, s.history_limit, confirmer, tz,
+        llm, store, s.system_prompt, s.history_limit, confirmer, tz,
         memories=store, usage=store, daily_token_limit=s.daily_token_limit,
     )
     transcriber = make_transcriber(s)
     log.info("голосовые: %s", type(transcriber).__name__ if transcriber else "выключены")
     dp = build_dispatcher(
         agent, s.allowed_ids, confirmer, tz, reminders=store,
-        transcriber=transcriber, voice_max_seconds=s.voice_max_seconds,
+        transcriber=transcriber, voice_max_seconds=s.voice_max_seconds, watchers=store,
     )
 
     notifier = TelegramNotifier(bot)
@@ -87,6 +92,18 @@ async def main():
     alerts.configure(alert_sink)
     reminder_service = ReminderService(store, notifier, store, tz)
     tasks = [asyncio.create_task(_heartbeat()), asyncio.create_task(reminder_service.run_forever())]
+    if s.watchers_enabled and search is not None:
+        from src.capabilities.web_search.tools import run_search
+
+        async def watch_search(query: str):
+            return await run_search(query, take_slot=False)  # у наблюдателей свой лимит
+
+        watcher_service = WatcherService(
+            store, llm, watch_search, notifier, store, store, tz,
+            daily_checks=s.watcher_daily_checks, daily_token_limit=s.daily_token_limit,
+        )
+        tasks.append(asyncio.create_task(watcher_service.run_forever()))
+        log.info("наблюдатели: включены (лимит проверок %s/день)", s.watcher_daily_checks or "нет")
     if hasattr(transcriber, "warmup"):
         tasks.append(asyncio.create_task(_warmup(transcriber)))
 

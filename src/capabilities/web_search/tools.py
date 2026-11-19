@@ -98,20 +98,11 @@ def _wrap(text: str, sources: list[str]) -> str:
     return f"{OPEN}\n{body}\n{CLOSE}\n{NOTICE}"
 
 
-@tool(
-    "web_search",
-    "Поиск актуальной информации в интернете (Google): расписания и результаты матчей, новости, курсы валют, погода, "
-    "цены, режим работы, события и любые факты, которые меняются или могли появиться после твоего обучения. "
-    "Используй, когда нужен свежий факт, а не знание. Формулируй запрос по-человечески и с конкретикой "
-    "(кто, что, за какой период); можно на любом языке. Возвращает сводку с источниками.",
-    {
-        "type": "object",
-        "properties": {"query": {"type": "string", "description": "Что найти, с датами и именами"}},
-        "required": ["query"],
-    },
-    untrusted_output=True,
-)
-async def web_search(query: str) -> str:
+async def run_search(query: str, take_slot: bool = True) -> tuple[str, list[str]]:
+    """Поисковый запрос к Gemini с Google. Возвращает (текст, источники); расход токенов уходит в общий счётчик.
+
+    take_slot=False для фоновых наблюдателей: у них свой дневной лимит, чтобы они не съедали интерактивный.
+    """
     query = " ".join((query or "").split())
     if not query:
         raise ValueError("Пустой поисковый запрос")
@@ -119,7 +110,8 @@ async def web_search(query: str) -> str:
         raise ValueError(f"Запрос длиннее {MAX_QUERY} символов: сформулируй короче")
     if _client is None:
         raise RuntimeError("Веб-поиск не настроен")
-    _take_slot()
+    if take_slot:
+        _take_slot()
 
     try:
         resp = await asyncio.wait_for(
@@ -141,8 +133,24 @@ async def web_search(query: str) -> str:
     if um is not None:
         prompt = um.prompt_token_count or 0
         await report_usage(f"gemini:{_model}+search", Usage(prompt, max(0, (um.total_token_count or 0) - prompt)))
+    return _text(resp), _sources(resp)
 
-    text = _text(resp)
+
+@tool(
+    "web_search",
+    "Поиск актуальной информации в интернете (Google): расписания и результаты матчей, новости, курсы валют, погода, "
+    "цены, режим работы, события и любые факты, которые меняются или могли появиться после твоего обучения. "
+    "Используй, когда нужен свежий факт, а не знание. Формулируй запрос по-человечески и с конкретикой "
+    "(кто, что, за какой период); можно на любом языке. Возвращает сводку с источниками.",
+    {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "Что найти, с датами и именами"}},
+        "required": ["query"],
+    },
+    untrusted_output=True,
+)
+async def web_search(query: str) -> str:
+    text, sources = await run_search(query)
     if not text:
         return _wrap("Ничего не найдено по этому запросу.", [])
-    return _wrap(text, _sources(resp))
+    return _wrap(text, sources)

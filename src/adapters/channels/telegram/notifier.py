@@ -28,3 +28,9 @@ class TelegramNotifier:
             ]
         )
         await self._bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None)
+
+    async def send_watch(self, chat_id: int, text: str, watcher_id: int) -> None:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🔕 Не следить", callback_data=f"wt:off:{watcher_id}")]]
+        )
+        await self._bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None)

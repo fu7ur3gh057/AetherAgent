@@ -13,6 +13,8 @@ COMMANDS = [
     BotCommand(command="start", description="Что я умею"),
     BotCommand(command="reminders", description="Активные напоминания"),
     BotCommand(command="cancel", description="Отменить напоминание по номеру"),
+    BotCommand(command="watchers", description="Наблюдатели: что отслеживаю"),
+    BotCommand(command="unwatch", description="Отключить наблюдателя по номеру"),
     BotCommand(command="memory", description="Что я о тебе помню"),
     BotCommand(command="forget", description="Забыть заметку по номеру"),
     BotCommand(command="usage", description="Расход токенов за сегодня и неделю"),

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import BigInteger, Date, DateTime, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Index, Integer, String, Text, Time, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -76,3 +76,24 @@ class LlmUsageRow(Base):
     input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
     output_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
     calls: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class WatcherRow(Base):
+    __tablename__ = "watchers"
+    __table_args__ = (Index("ix_watchers_status_next_run_at", "status", "next_run_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    title: Mapped[str] = mapped_column(String(120))
+    query: Mapped[str] = mapped_column(Text)
+    condition: Mapped[str] = mapped_column(Text)
+    once: Mapped[bool] = mapped_column(Boolean, default=False)
+    interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_at: Mapped[time | None] = mapped_column(Time, nullable=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    last_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

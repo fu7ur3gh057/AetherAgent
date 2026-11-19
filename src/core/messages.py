@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Literal
 
 
@@ -102,6 +102,25 @@ class UsageSummary:
 
     def day_total(self, day: date) -> int:
         return sum(r.input_tokens + r.output_tokens for r in self.rows if r.day == day)
+
+
+@dataclass
+class Watcher:
+    """Наблюдатель: по расписанию ищет в интернете и пишет владельцу, когда выполняется условие."""
+
+    id: int
+    chat_id: int
+    title: str
+    query: str  # что искать (без относительных дат: текущая дата подставляется при каждой проверке)
+    condition: str  # когда уведомлять, словами
+    once: bool  # True: после первого уведомления наблюдатель завершается
+    interval_minutes: int | None
+    daily_at: time | None  # ровно одно из interval_minutes / daily_at
+    next_run_at: datetime  # UTC
+    status: str = "active"  # active | paused | done | cancelled
+    last_summary: str | None = None  # о чём сообщали или что видели в прошлый раз (чтобы не повторяться)
+    last_checked_at: datetime | None = None
+    last_notified_at: datetime | None = None
 
 
 @dataclass
