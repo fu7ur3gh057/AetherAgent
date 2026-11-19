@@ -1,0 +1,68 @@
+---
+# ./deploy.sh setup   — первый раз: папка, git clone, загрузка .env
+# ./deploy.sh env     — перезалить .env на сервер и перезапустить
+# ./deploy.sh         — git pull + пересборка + ожидание healthcheck
+- name: Deploy Aether
+  hosts: prod
+  gather_facts: false
+  vars:
+    aether_root: /opt/aether
+    repo_url: "https://github.com/fu7ur3gh057/AetherAgent.git"
+    branch: main
+    compose_file: "{{ aether_root }}/docker-compose.yml"
+
+  tasks:
+    - name: Setup | создать /opt/aether
+      ansible.builtin.file:
+        path: "{{ aether_root }}"
+        state: directory
+        mode: "0750"
+      tags: [setup]
+
+    - name: Setup | git clone (если ещё нет)
+      ansible.builtin.command:
+        cmd: git clone -b {{ branch }} {{ repo_url }} {{ aether_root }}
+        creates: "{{ aether_root }}/.git"
+      tags: [setup]
+
+    - name: Env | загрузить .env с мака (права 600)
+      ansible.builtin.copy:
+        src: ../.env
+        dest: "{{ aether_root }}/.env"
+        mode: "0600"
+      tags: [setup, env]
+
+    - name: Env | перезапустить после смены .env
+      ansible.builtin.command: docker compose -f {{ compose_file }} up -d --build
+      tags: [env]
+
+    - name: Deploy | git pull
+      ansible.builtin.command: git -C {{ aether_root }} pull origin {{ branch }}
+      register: pull
+      changed_when: "'Already up to date' not in pull.stdout"
+      tags: [deploy]
+
+    - name: Deploy | пересобрать и перезапустить
+      ansible.builtin.command: docker compose -f {{ compose_file }} up -d --build
+      tags: [deploy, setup]
+
+    - name: Deploy | ждать healthcheck бота (миграции идут при старте)
+      ansible.builtin.command: docker inspect -f '{{ '{{' }}.State.Health.Status{{ '}}' }}' aether_bot
+      register: health
+      until: health.stdout | trim == 'healthy'
+      retries: 30
+      delay: 5
+      changed_when: false
+      tags: [deploy, setup, env]
+
+    - name: Что выкачено
+      ansible.builtin.shell: |
+        git -C {{ aether_root }} log -1 --format='aether: %h %s'
+        docker compose -f {{ compose_file }} ps --format 'table {{ '{{' }}.Name{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}'
+      register: summary
+      changed_when: false
+      tags: [deploy, setup, env]
+
+    - ansible.builtin.debug:
+        msg: "{{ summary.stdout_lines }}"
+      tags: [deploy, setup, env]

@@ -1,0 +1,50 @@
+name: aether
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aether_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aether}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задай POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aether}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    expose:
+      - 5432   # только внутри сети aether-net, наружу не публикуем
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-U", "${POSTGRES_USER:-aether}", "-d", "${POSTGRES_DB:-aether}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - aether-net
+
+  bot:
+    build: .
+    container_name: aether_bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aether}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aether}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # heartbeat-файл обновляется каждые 30с
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/aether.heartbeat) )) -lt 90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - aether-net
+
+networks:
+  aether-net:
+    driver: bridge
+
+volumes:
+  pg-data: {}
