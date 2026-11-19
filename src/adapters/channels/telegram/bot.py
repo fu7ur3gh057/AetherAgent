@@ -215,7 +215,6 @@ def build_dispatcher(
             await m.answer("🎤 Речь не распознана.")
             return
 
-        await m.answer(f"🎤 {text}"[:TG_LIMIT], parse_mode=None)  # показываем расшифровку: видно, как поняли
         if m.forward_origin is not None:
             # чужая речь: это данные, а не команды владельца
             text = (

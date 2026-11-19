@@ -76,11 +76,11 @@ def run(msg, stt, **kw):
     return asyncio.run(_run(msg, stt, **kw))
 
 
-def test_voice_is_transcribed_echoed_and_answered():
+def test_voice_is_transcribed_and_answered_without_echo():
     stt = FakeSTT()
     out, downloads, llm = run(voice_msg(), stt)
     assert stt.calls == [(b"AUDIO-BYTES", "audio/ogg")]
-    assert out[0] == "🎤 привет, напомни позвонить Руслану" and out[1] == "ответ"
+    assert out == ["ответ"]                                           # расшифровку обратно не эхом, только ответ
     assert llm.seen == ["привет, напомни позвонить Руслану"]       # модель видит чистый текст
 
 
