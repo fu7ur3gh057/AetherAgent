@@ -30,9 +30,11 @@ class Settings(BaseSettings):
     # дни недели для сводки (1=пн ... 7=вс)
     digest_days: str = "1,2,3,4,5,6,7"
 
-    # Голосовые сообщения. STT_PROVIDER: пусто = авто (gemini, если есть GEMINI_API_KEY), gemini | whisper | off
+    # Голосовые сообщения. STT_PROVIDER: пусто = авто (whisper, если установлен, иначе gemini), whisper | gemini | off
     stt_provider: str = ""
-    stt_model: str = ""  # gemini: по умолчанию GEMINI_MODEL; whisper: tiny/base/small/medium (по умолчанию small)
+    stt_model: str = ""  # whisper: tiny/base/small/medium (по умолчанию small); gemini: по умолчанию GEMINI_MODEL
+    # Запасной распознаватель при ошибке основного: gemini | off. ВНИМАНИЕ: gemini отправляет аудио в Google
+    stt_fallback: str = "gemini"
     voice_max_seconds: int = 300
     whisper_cpu_threads: int = 2
     whisper_model_dir: Path = ROOT / "data" / "whisper"

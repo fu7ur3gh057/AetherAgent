@@ -123,17 +123,67 @@ def test_stranger_voice_is_ignored():
     assert out == [] and downloads == [] and stt.calls == [] and llm.seen == []
 
 
-def test_make_transcriber_selection():
+def _pick(whisper_installed, **kw):
     base = dict(telegram_bot_token="x", _env_file=None)
-    assert make_transcriber(Settings(**base)) is None                                          # нет ключа: выключено
-    assert type(make_transcriber(Settings(**base, gemini_api_key="k"))).__name__ == "GeminiTranscriber"
-    assert make_transcriber(Settings(**base, gemini_api_key="k", stt_provider="off")) is None
+    with patch("src.app.wiring._whisper_available", return_value=whisper_installed):
+        return make_transcriber(Settings(**base, **kw))
+
+
+def cls_name(t):
+    return type(t).__name__ if t is not None else None
+
+
+def test_make_transcriber_selection():
+    # авто: Whisper основной, если установлен; запасным служит Gemini при наличии ключа
+    assert cls_name(_pick(True, gemini_api_key="k")) == "FallbackTranscriber"
+    assert cls_name(_pick(True)) == "WhisperTranscriber"                                       # нет ключа: без запасного
+    assert cls_name(_pick(True, gemini_api_key="k", stt_fallback="off")) == "WhisperTranscriber"  # только локально
+    # Whisper не установлен: Gemini или выкл.
+    assert cls_name(_pick(False, gemini_api_key="k")) == "GeminiTranscriber"
+    assert _pick(False) is None
+    assert _pick(True, gemini_api_key="k", stt_provider="off") is None
+    assert cls_name(_pick(True, gemini_api_key="k", stt_provider="gemini")) == "GeminiTranscriber"
     for kw in ({"stt_provider": "gemini"}, {"stt_provider": "nope"}):
         try:
-            make_transcriber(Settings(**base, **kw))
+            _pick(True, **kw)
             assert False, kw
         except RuntimeError:
             pass
+
+
+def test_gemini_never_returns_its_own_instruction():
+    from src.adapters.stt import gemini
+
+    assert gemini.clean("") == "" and gemini.clean("  привет  ") == "привет"
+    for echoed in (gemini.INSTRUCTION, "Расшифруй речь из этого аудио дословно, на том языке...", "Верни пустую строку."):
+        assert gemini.clean(echoed) == ""
+
+
+class Boom:
+    async def transcribe(self, audio, mime): raise RuntimeError("упал")
+
+
+class Const:
+    def __init__(self, text): self.text, self.n = text, 0
+
+    async def transcribe(self, audio, mime):
+        self.n += 1
+        return self.text
+
+
+def test_fallback_used_on_error_but_not_on_empty_result():
+    from src.adapters.stt.fallback import FallbackTranscriber
+
+    backup = Const("запасной")
+    assert asyncio.run(FallbackTranscriber(Boom(), backup).transcribe(b"x", "audio/ogg")) == "запасной" and backup.n == 1
+    backup = Const("запасной")
+    assert asyncio.run(FallbackTranscriber(Const(""), backup).transcribe(b"x", "audio/ogg")) == "" and backup.n == 0  # тишина не уходит в облако
+    both = FallbackTranscriber(Boom(), Boom())
+    try:
+        asyncio.run(both.transcribe(b"x", "audio/ogg"))
+        assert False
+    except RuntimeError:
+        pass
 
 
 if __name__ == "__main__":

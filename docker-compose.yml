@@ -25,7 +25,7 @@ services:
     build:
       context: .
       args:
-        WITH_WHISPER: ${WITH_WHISPER:-0}
+        WITH_WHISPER: ${WITH_WHISPER:-1}
     container_name: aether_bot
     restart: always
     # Сервер общий с Glent и GODA: бот (и локальный Whisper) не должен отнимать у них ресурсы
