@@ -7,8 +7,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); trap 'docker rm -f aether_it_a aether_it_b >/dev/null 2>&1 || true; rm -rf "$T"' EXIT
 fail() { echo "ПРОВАЛ: $*" >&2; exit 1; }
+# Образ postgres на первом старте поднимает ВРЕМЕННЫЙ сервер (только unix-сокет) для инициализации и затем перезапускается:
+# pg_isready по сокету отвечает «готов» слишком рано. Настоящий сервер слушает TCP, поэтому ждём по -h 127.0.0.1.
 start() { docker run -d --rm --name "$1" -e POSTGRES_PASSWORD=t -e POSTGRES_USER=t -e POSTGRES_DB=t postgres:16-alpine >/dev/null
-          for _ in $(seq 1 40); do docker exec "$1" pg_isready -q -U t && return; sleep 1; done; fail "$1 не поднялся"; }
+          for _ in $(seq 1 60); do docker exec "$1" pg_isready -q -h 127.0.0.1 -U t && return; sleep 1; done; fail "$1 не поднялся"; }
 q() { docker exec "$1" psql -tA -U t -d t -c "$2"; }
 SQL="create table notes(id serial primary key, body text); insert into notes(body) values ('Живёт в Баку'),('Любит краткие ответы');"
 
