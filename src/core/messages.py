@@ -39,12 +39,22 @@ class Usage:
 
 
 @dataclass
+class Attachment:
+    """Вложение пользователя (фото, PDF), которое модель видит в этом запросе. В БД не хранится."""
+
+    mime_type: str
+    data: bytes
+    name: str = ""
+
+
+@dataclass
 class Message:
     role: Literal["user", "assistant", "tool"]
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)  # role=assistant
     tool_results: list[ToolResult] = field(default_factory=list)  # role=tool
     usage: Usage | None = None  # заполняет провайдер LLM; в БД история его не хранит
+    attachments: list[Attachment] = field(default_factory=list)  # role=user; только для текущего запроса
 
 
 @dataclass

@@ -1,15 +1,28 @@
 from __future__ import annotations
 
+import base64
+
 from anthropic import AsyncAnthropic
 
 from src.core.messages import Message, ToolCall, ToolSpec, Usage
+
+
+def _attachment_block(a) -> dict:
+    data = base64.b64encode(a.data).decode()
+    kind = "document" if a.mime_type == "application/pdf" else "image"
+    return {"type": kind, "source": {"type": "base64", "media_type": a.mime_type, "data": data}}
 
 
 def _to_api(messages: list[Message]) -> list[dict]:
     out: list[dict] = []
     for m in messages:
         if m.role == "user":
-            out.append({"role": "user", "content": m.text})
+            if m.attachments:
+                blocks = [_attachment_block(a) for a in m.attachments]
+                blocks.append({"type": "text", "text": m.text})  # вложения перед текстом, как рекомендует Anthropic
+                out.append({"role": "user", "content": blocks})
+            else:
+                out.append({"role": "user", "content": m.text})
         elif m.role == "assistant":
             blocks: list[dict] = []
             if m.text:

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone, tzinfo
 
 from src.core import alerts
 from src.core.context import current_chat_id
-from src.core.messages import HistoryItem, MemoryItem, Message, ToolCall, ToolResult, Usage, UsageSummary
+from src.core.messages import Attachment, HistoryItem, MemoryItem, Message, ToolCall, ToolResult, Usage, UsageSummary
 from src.core.ports import Confirmer, LLMProvider, MemoryStore, MessageStore, UsageStore
 from src.core.tools import REGISTRY, specs
 
@@ -53,17 +53,19 @@ class Agent:
         # следующее сообщение не должно перемешать историю
         self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    async def handle(self, chat_id: int, text: str) -> str:
+    async def handle(self, chat_id: int, text: str, attachments: list[Attachment] | None = None) -> str:
         async with self._locks[chat_id]:
             current_chat_id.set(chat_id)
-            return await self._handle(chat_id, text)
+            return await self._handle(chat_id, text, attachments or [])
 
-    async def _handle(self, chat_id: int, text: str) -> str:
+    async def _handle(self, chat_id: int, text: str, attachments: list[Attachment]) -> str:
         history = await self.store.history(chat_id, self.history_limit)
         system = await self._system(chat_id)
-        new: list[Message] = [Message(role="user", text=text)]
+        new: list[Message] = [Message(role="user", text=text, attachments=attachments)]
         reply = ""
-        tainted = False  # в этом ходу уже прочитаны данные из внешнего мира (письма и т.п.)
+        # «заражённый» ход: в нём уже есть данные из внешнего мира (письма, а также содержимое вложений:
+        # в фото и документе может быть спрятана инструкция для бота)
+        tainted = bool(attachments)
 
         for step in range(MAX_STEPS):
             blocked = await self._budget_block()

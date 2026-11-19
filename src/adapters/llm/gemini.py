@@ -15,7 +15,9 @@ def _to_contents(messages: list[Message]) -> list[types.Content]:
     out: list[types.Content] = []
     for m in messages:
         if m.role == "user":
-            out.append(types.Content(role="user", parts=[types.Part(text=m.text)]))
+            parts = [types.Part.from_bytes(data=a.data, mime_type=a.mime_type) for a in m.attachments]
+            parts.append(types.Part(text=m.text))
+            out.append(types.Content(role="user", parts=parts))
         elif m.role == "assistant":
             parts: list[types.Part] = []
             if m.text:
