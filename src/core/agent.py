@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from src.core.messages import Message, ToolCall, ToolResult
+from src.core.messages import HistoryItem, Message, ToolCall, ToolResult
 from src.core.ports import LLMProvider, MessageStore
 from src.core.tools import REGISTRY, specs
 
@@ -41,6 +41,12 @@ class Agent:
 
     async def reset(self, chat_id: int) -> None:
         await self.store.clear(chat_id)
+
+    async def recent(self, chat_id: int, limit: int = 10) -> list[HistoryItem]:
+        return await self.store.recent(chat_id, limit)
+
+    async def search(self, chat_id: int, query: str, limit: int = 10) -> list[HistoryItem]:
+        return await self.store.search(chat_id, query, limit)
 
     async def _run_tool(self, call: ToolCall) -> ToolResult:
         t = REGISTRY.get(call.name)

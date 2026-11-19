@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.adapters.storage.postgres.models import MessageRow
-from src.core.messages import Message, ToolCall, ToolResult
+from src.core.messages import HistoryItem, Message, ToolCall, ToolResult
 
 
 def _to_row(chat_id: int, m: Message) -> MessageRow:
@@ -63,6 +63,30 @@ class PostgresStore:
         async with self.session() as s:
             await s.execute(delete(MessageRow).where(MessageRow.chat_id == chat_id))
             await s.commit()
+
+    async def _items(self, chat_id: int, *conds, limit: int) -> list[HistoryItem]:
+        q = (
+            select(MessageRow)
+            .where(
+                MessageRow.chat_id == chat_id,
+                MessageRow.role.in_(("user", "assistant")),
+                MessageRow.text != "",
+                *conds,
+            )
+            .order_by(MessageRow.id.desc())
+            .limit(limit)
+        )
+        async with self.session() as s:
+            rows = (await s.scalars(q)).all()
+        return [HistoryItem(r.role, r.text, r.created_at) for r in reversed(rows)]  # type: ignore[arg-type]
+
+    async def recent(self, chat_id: int, limit: int) -> list[HistoryItem]:
+        return await self._items(chat_id, limit=limit)
+
+    async def search(self, chat_id: int, query: str, limit: int) -> list[HistoryItem]:
+        # экранируем спецсимволы LIKE, чтобы % и _ в запросе искались буквально
+        esc = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return await self._items(chat_id, MessageRow.text.ilike(f"%{esc}%", escape="\\"), limit=limit)
 
     async def close(self) -> None:
         await self._engine.dispose()

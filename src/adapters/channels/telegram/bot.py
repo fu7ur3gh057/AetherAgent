@@ -4,18 +4,37 @@ import logging
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatAction
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from src.core.agent import Agent
+from src.core.messages import HistoryItem
 
 log = logging.getLogger(__name__)
 TG_LIMIT = 4096
+MAX_LIST = 20   # максимум записей в /history и /search
+SNIPPET = 200   # длина фрагмента реплики в списке
 
 
 def _chunks(text: str, size: int = TG_LIMIT):
     for i in range(0, len(text), size):
         yield text[i : i + size]
+
+
+def _fmt(item: HistoryItem) -> str:
+    who = "Я" if item.role == "user" else "Aether"
+    text = " ".join(item.text.split())
+    if len(text) > SNIPPET:
+        text = text[:SNIPPET] + "…"
+    return f"{item.created_at:%d.%m %H:%M} {who}: {text}"  # время в UTC
+
+
+async def _send_items(m: Message, items: list[HistoryItem], empty: str) -> None:
+    if not items:
+        await m.answer(empty)
+        return
+    for part in _chunks("\n\n".join(_fmt(i) for i in items)):
+        await m.answer(part, parse_mode=None)
 
 
 def build_dispatcher(agent: Agent, allowed_ids: set[int]) -> Dispatcher:
@@ -25,12 +44,31 @@ def build_dispatcher(agent: Agent, allowed_ids: set[int]) -> Dispatcher:
 
     @router.message(Command("start"))
     async def start(m: Message):
-        await m.answer("Aether на связи. Пиши вопрос. /reset очищает историю.")
+        await m.answer(
+            "Aether на связи. Пиши вопрос.\n"
+            "/history [N] — последние реплики\n"
+            "/search слово — поиск по истории\n"
+            "/reset — очистить историю"
+        )
 
     @router.message(Command("reset"))
     async def reset(m: Message):
         await agent.reset(m.chat.id)
         await m.answer("История очищена.")
+
+    @router.message(Command("history"))
+    async def history(m: Message, command: CommandObject):
+        n = int(command.args) if command.args and command.args.strip().isdigit() else 10
+        items = await agent.recent(m.chat.id, max(1, min(n, MAX_LIST)))
+        await _send_items(m, items, "История пуста.")
+
+    @router.message(Command("search"))
+    async def search(m: Message, command: CommandObject):
+        if not command.args or not command.args.strip():
+            await m.answer("Использование: /search слово")
+            return
+        items = await agent.search(m.chat.id, command.args.strip(), MAX_LIST)
+        await _send_items(m, items, "Ничего не найдено.")
 
     @router.message(F.text)
     async def on_text(m: Message):
@@ -43,8 +81,25 @@ def build_dispatcher(agent: Agent, allowed_ids: set[int]) -> Dispatcher:
         for part in _chunks(reply):
             await m.answer(part, parse_mode=None)
 
+    # всё, что прошло мимо владельца: молча игнорируем, но фиксируем в логе (без текста сообщения)
+    guard = Router()
+
+    def _stranger(event) -> bool:
+        return event.from_user is None or event.from_user.id not in allowed_ids
+
+    @guard.message(_stranger)
+    @guard.callback_query(_stranger)
+    async def stranger(event):
+        u = event.from_user
+        log.warning(
+            "unauthorized access attempt: user_id=%s username=%s",
+            u.id if u else None,
+            u.username if u else None,
+        )
+
     dp = Dispatcher()
     dp.include_router(router)
+    dp.include_router(guard)
     return dp
 
 

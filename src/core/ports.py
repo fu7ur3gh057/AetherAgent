@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.core.messages import Message, ToolSpec
+from src.core.messages import HistoryItem, Message, ToolSpec
 
 
 class LLMProvider(Protocol):
@@ -24,3 +24,11 @@ class MessageStore(Protocol):
     async def add(self, chat_id: int, messages: list[Message]) -> None: ...
 
     async def clear(self, chat_id: int) -> None: ...
+
+    async def recent(self, chat_id: int, limit: int) -> list[HistoryItem]:
+        """Последние реплики (user/assistant с текстом), от старых к новым."""
+        ...
+
+    async def search(self, chat_id: int, query: str, limit: int) -> list[HistoryItem]:
+        """Реплики, содержащие query (без учёта регистра), от старых к новым."""
+        ...

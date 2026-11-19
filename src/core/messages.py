@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 
@@ -31,6 +32,15 @@ class Message:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)  # role=assistant
     tool_results: list[ToolResult] = field(default_factory=list)  # role=tool
+
+
+@dataclass
+class HistoryItem:
+    """Запись истории для показа человеку (/history, /search)."""
+
+    role: Literal["user", "assistant"]
+    text: str
+    created_at: datetime
 
 
 @dataclass
