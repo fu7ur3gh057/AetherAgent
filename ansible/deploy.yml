@@ -7,11 +7,40 @@
   gather_facts: false
   vars:
     aether_root: /opt/aether
-    repo_url: "https://github.com/fu7ur3gh057/AetherAgent.git"
+    # host-алиас github-aether описан в ~/.ssh/config на сервере (см. ниже)
+    repo_url: "git@github-aether:fu7ur3gh057/AetherAgent.git"
+    deploy_key: ~/.ssh/aether_deploy
     branch: main
     compose_file: "{{ aether_root }}/docker-compose.yml"
 
   tasks:
+    - name: Setup | проверить, что deploy key существует на сервере
+      ansible.builtin.stat:
+        path: "{{ deploy_key }}"
+      register: key
+      tags: [setup]
+
+    - name: Setup | остановиться, если ключа нет
+      ansible.builtin.assert:
+        that: key.stat.exists
+        fail_msg: "На сервере нет {{ deploy_key }}. Создай ключ и добавь .pub в GitHub Deploy keys."
+      tags: [setup]
+
+    - name: Setup | ssh-алиас github-aether (только для этого репо, не трогает Glent)
+      ansible.builtin.blockinfile:
+        path: ~/.ssh/config
+        create: true
+        mode: "0600"
+        marker: "# {mark} aether"
+        block: |
+          Host github-aether
+            HostName github.com
+            User git
+            IdentityFile {{ deploy_key }}
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+      tags: [setup]
+
     - name: Setup | создать /opt/aether
       ansible.builtin.file:
         path: "{{ aether_root }}"
