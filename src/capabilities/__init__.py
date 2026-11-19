@@ -40,6 +40,11 @@ def load_all(
         reminders.register(reminder_store, tz)
         log.info("capability reminders: включена")
 
+    from src.capabilities import web_fetch
+
+    web_fetch.register()
+    log.info("capability web_fetch: включена (read_url)")
+
     if web_search is not None:
         from src.capabilities import web_search as ws
 
