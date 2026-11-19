@@ -9,8 +9,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.adapters.storage.postgres.models import JobRunRow, MemoryRow, MessageRow, ReminderRow
-from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolCall, ToolResult
+from src.adapters.storage.postgres.models import JobRunRow, LlmUsageRow, MemoryRow, MessageRow, ReminderRow
+from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolCall, ToolResult, UsageRow
 
 
 def _reminder(r: ReminderRow) -> Reminder:
@@ -236,6 +236,39 @@ class PostgresStore:
                 await s.execute(update(ReminderRow).where(ReminderRow.id == reminder_id).values(status="failed"))
             await s.commit()
         return n or 0
+
+    # ---- расход токенов
+
+    async def add_usage(self, day: date, model: str, input_tokens: int, output_tokens: int) -> None:
+        ins = pg_insert(LlmUsageRow).values(
+            day=day, model=model, input_tokens=input_tokens, output_tokens=output_tokens, calls=1
+        )
+        stmt = ins.on_conflict_do_update(
+            index_elements=[LlmUsageRow.day, LlmUsageRow.model],
+            set_={
+                "input_tokens": LlmUsageRow.input_tokens + ins.excluded.input_tokens,
+                "output_tokens": LlmUsageRow.output_tokens + ins.excluded.output_tokens,
+                "calls": LlmUsageRow.calls + 1,
+            },
+        )
+        async with self.session() as s:
+            await s.execute(stmt)
+            await s.commit()
+
+    async def usage_total(self, day: date) -> int:
+        async with self.session() as s:
+            total = await s.scalar(
+                select(func.coalesce(func.sum(LlmUsageRow.input_tokens + LlmUsageRow.output_tokens), 0)).where(
+                    LlmUsageRow.day == day
+                )
+            )
+        return int(total or 0)
+
+    async def usage_since(self, since: date) -> list[UsageRow]:
+        q = select(LlmUsageRow).where(LlmUsageRow.day >= since).order_by(LlmUsageRow.day.desc(), LlmUsageRow.model)
+        async with self.session() as s:
+            rows = (await s.scalars(q)).all()
+        return [UsageRow(r.day, r.model, r.input_tokens, r.output_tokens, r.calls) for r in rows]
 
     async def close(self) -> None:
         await self._engine.dispose()

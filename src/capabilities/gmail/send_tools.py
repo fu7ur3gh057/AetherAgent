@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-import asyncio
 
 from src.capabilities.gmail import client
+from src.capabilities.gmail.runner import run
 from src.core.tools import tool
 
 
@@ -48,12 +48,12 @@ def _describe_send(a: dict) -> str:
 )
 async def gmail_send(to: str, subject: str, body: str, cc: str | None = None) -> str:
     to_l, cc_l = client.parse_recipients(to), client.parse_recipients(cc)
-    msg_id = await asyncio.to_thread(client.send, to_l, subject, body, cc_l)
+    msg_id = await run(client.send, to_l, subject, body, cc_l)
     return f"Письмо отправлено (id={msg_id}) на {', '.join(to_l)}."
 
 
 async def _describe_reply(a: dict) -> str:
-    ctx = await asyncio.to_thread(client.reply_context, a.get("message_id", ""))
+    ctx = await run(client.reply_context, a.get("message_id", ""))
     if not ctx.to:
         raise ValueError("Не удалось определить адресата исходного письма")
     body = a.get("body", "")
@@ -78,5 +78,5 @@ async def _describe_reply(a: dict) -> str:
     describe=_describe_reply,
 )
 async def gmail_reply(message_id: str, body: str) -> str:
-    msg_id = await asyncio.to_thread(client.send_reply, message_id, body)
+    msg_id = await run(client.send_reply, message_id, body)
     return f"Ответ отправлен (id={msg_id})."

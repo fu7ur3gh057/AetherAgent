@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from datetime import datetime
+from datetime import date, datetime
 
-from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolSpec
+from src.core.messages import HistoryItem, MemoryItem, Message, Reminder, ToolSpec, UsageRow
 
 
 class LLMProvider(Protocol):
@@ -93,4 +93,18 @@ class ReminderStore(Protocol):
 class Transcriber(Protocol):
     async def transcribe(self, audio: bytes, mime_type: str) -> str:
         """Расшифровать речь из аудио/видео. Пустая строка, если речи нет."""
+        ...
+
+
+class UsageStore(Protocol):
+    async def add_usage(self, day: date, model: str, input_tokens: int, output_tokens: int) -> None:
+        """Прибавить расход к счётчику (день, модель) и увеличить число запросов."""
+        ...
+
+    async def usage_total(self, day: date) -> int:
+        """Всего токенов (вход + выход) за день по всем моделям."""
+        ...
+
+    async def usage_since(self, since: date) -> list[UsageRow]:
+        """Строки счётчика начиная с даты (включительно)."""
         ...

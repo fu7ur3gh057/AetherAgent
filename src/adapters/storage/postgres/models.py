@@ -64,3 +64,15 @@ class ReminderRow(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LlmUsageRow(Base):
+    """Счётчик расхода токенов: одна строка на (день, модель)."""
+
+    __tablename__ = "llm_usage"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    model: Mapped[str] = mapped_column(String(96), primary_key=True)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    calls: Mapped[int] = mapped_column(Integer, default=0)

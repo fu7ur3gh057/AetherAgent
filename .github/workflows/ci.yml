@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Тесты
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
+      # Settings требует токен; реальные ключи и .env в CI не нужны
+      TELEGRAM_BOT_TOKEN: ci
+      ALLOWED_USER_IDS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Все тесты (каждый файл в своём процессе: инструменты регистрируются глобально)
+        run: |
+          for f in tests/test_*.py; do
+            echo "::group::$f"
+            python "$f" || { echo "::error file=$f::тесты упали"; exit 1; }
+            echo "::endgroup::"
+          done
+
+  backups:
+    name: Резервные копии на настоящем Postgres
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/integration_backup.sh
+
+  docker:
+    name: Образ и compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Образ собирается (без Whisper, чтобы было быстро) и приложение в нём импортируется
+        run: |
+          docker build --build-arg WITH_WHISPER=0 -t aether-ci .
+          docker run --rm --entrypoint python -e TELEGRAM_BOT_TOKEN=ci aether-ci -c "import src.app.main"
+      - name: docker-compose.yml валиден
+        run: |
+          cp .env.example .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/' .env
+          docker compose config -q
+
+  ansible:
+    name: Синтаксис Ansible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core
+      - working-directory: ansible
+        run: |
+          ansible-playbook deploy.yml --syntax-check
+          ansible-playbook backup.yml --syntax-check
+      - run: bash -n ansible/deploy.sh && bash -n ansible/files/aether-backup.sh

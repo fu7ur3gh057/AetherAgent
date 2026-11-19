@@ -29,6 +29,28 @@ def _chunks(text: str, size: int = TG_LIMIT):
         yield text[i : i + size]
 
 
+def _n(x: int) -> str:
+    return f"{x:,}".replace(",", " ")
+
+
+def usage_text(summary, tz) -> str:
+    today = summary.today
+    rows = [r for r in summary.rows if r.day == today]
+    inp, out, calls = sum(r.input_tokens for r in rows), sum(r.output_tokens for r in rows), sum(r.calls for r in rows)
+    total = inp + out
+    lines = ["📊 Расход токенов", "", f"Сегодня: {_n(total)} (вход {_n(inp)} · выход {_n(out)}) · запросов: {calls}"]
+    if summary.limit > 0:
+        lines.append(f"Лимит: {_n(summary.limit)} ({total * 100 // summary.limit}%)")
+    else:
+        lines.append("Лимит: не задан")
+    for r in sorted(rows, key=lambda r: -(r.input_tokens + r.output_tokens)):
+        lines.append(f"  · {r.model}: {_n(r.input_tokens + r.output_tokens)}")
+    days = sorted({r.day for r in summary.rows if r.day != today}, reverse=True)
+    if days:
+        lines += ["", "Предыдущие дни:"] + [f"{d:%d.%m} — {_n(summary.day_total(d))}" for d in days]
+    return "\n".join(lines)
+
+
 def _fmt(item: HistoryItem, tz: tzinfo = timezone.utc) -> str:
     who = "🧑 Я" if item.role == "user" else "🤖 Aether"
     text = " ".join(item.text.split())
@@ -133,6 +155,7 @@ def build_dispatcher(
             "🔎 /search слово — поиск по истории\n"
             "⏰ /reminders — активные напоминания\n"
             "🧠 /memory — что я о тебе помню\n"
+            "📊 /usage — расход токенов\n"
             "🗑 /forget N — забыть заметку\n"
             "🧹 /reset — очистить историю"
         )
@@ -155,6 +178,10 @@ def build_dispatcher(
             return
         items = await agent.search(m.chat.id, command.args.strip(), MAX_LIST)
         await _send_items(m, items, "🔍 Ничего не найдено.", tz)
+
+    @router.message(Command("usage"))
+    async def usage(m: Message):
+        await m.answer(usage_text(await agent.usage_summary(7), tz), parse_mode=None)
 
     @router.message(Command("memory"))
     async def memory(m: Message):

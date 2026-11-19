@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 
 from src.capabilities.gmail import client
+from src.capabilities.gmail.runner import run
 from src.core.tools import tool
 
 OPEN, CLOSE = "<untrusted_email_data>", "</untrusted_email_data>"
@@ -52,7 +52,7 @@ def _fmt_list(items: list[client.MailInfo]) -> str:
     untrusted_output=True,
 )
 async def gmail_search(query: str, max_results: int = 10) -> str:
-    return _fmt_list(await asyncio.to_thread(client.search, query, _limit(max_results)))
+    return _fmt_list(await run(client.search, query, _limit(max_results)))
 
 
 @tool(
@@ -67,7 +67,7 @@ async def gmail_search(query: str, max_results: int = 10) -> str:
     untrusted_output=True,
 )
 async def gmail_unread(max_results: int = 10) -> str:
-    return _fmt_list(await asyncio.to_thread(client.search, "is:unread in:inbox", _limit(max_results)))
+    return _fmt_list(await run(client.search, "is:unread in:inbox", _limit(max_results)))
 
 
 @tool(
@@ -81,7 +81,7 @@ async def gmail_unread(max_results: int = 10) -> str:
     untrusted_output=True,
 )
 async def gmail_read(message_id: str) -> str:
-    m = await asyncio.to_thread(client.read, message_id)
+    m = await run(client.read, message_id)
     return _wrap(
         f"От: {m.sender}\nКому: {m.to}\nДата: {m.date}\nТема: {m.subject}\n\n{m.body or '(пустое тело)'}"
     )

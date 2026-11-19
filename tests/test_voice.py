@@ -124,8 +124,13 @@ def test_stranger_voice_is_ignored():
 
 
 def _pick(whisper_installed, **kw):
+    import sys
+    import types
+
     base = dict(telegram_bot_token="x", _env_file=None)
-    with patch("src.app.wiring._whisper_available", return_value=whisper_installed):
+    # faster-whisper в тестах не нужен: подставляем пустой модуль, чтобы конструктор не требовал реальную библиотеку
+    with patch("src.app.wiring._whisper_available", return_value=whisper_installed), \
+         patch.dict(sys.modules, {"faster_whisper": types.ModuleType("faster_whisper")}):
         return make_transcriber(Settings(**base, **kw))
 
 

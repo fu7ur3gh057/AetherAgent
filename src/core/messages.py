@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 
@@ -27,11 +27,24 @@ class ToolResult:
 
 
 @dataclass
+class Usage:
+    """Расход токенов одного запроса к модели."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0  # включая «размышления», если провайдер их считает
+
+    @property
+    def total(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+@dataclass
 class Message:
     role: Literal["user", "assistant", "tool"]
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)  # role=assistant
     tool_results: list[ToolResult] = field(default_factory=list)  # role=tool
+    usage: Usage | None = None  # заполняет провайдер LLM; в БД история его не хранит
 
 
 @dataclass
@@ -60,6 +73,25 @@ class Reminder:
     remind_at: datetime  # UTC
     repeat: str | None = None  # None | daily | weekdays | weekly
     status: str = "pending"  # pending | sent | cancelled | failed
+
+
+@dataclass
+class UsageRow:
+    day: date
+    model: str
+    input_tokens: int
+    output_tokens: int
+    calls: int
+
+
+@dataclass
+class UsageSummary:
+    today: date
+    limit: int  # 0 = без лимита
+    rows: list[UsageRow]
+
+    def day_total(self, day: date) -> int:
+        return sum(r.input_tokens + r.output_tokens for r in self.rows if r.day == day)
 
 
 @dataclass

@@ -6,7 +6,7 @@ import uuid
 from google import genai
 from google.genai import types
 
-from src.core.messages import Message, ToolCall, ToolSpec
+from src.core.messages import Message, ToolCall, ToolSpec, Usage
 
 
 def _to_contents(messages: list[Message]) -> list[types.Content]:
@@ -59,6 +59,7 @@ class GeminiProvider:
             api_key=api_key, http_options=types.HttpOptions(api_version="v1beta")
         )
         self._model = model
+        self.model_name = f"gemini:{model}"
         self._max_tokens = max_tokens
 
     async def chat(
@@ -93,4 +94,10 @@ class GeminiProvider:
                 text += p.text
         if not text and not calls and cand is not None:
             text = f"(модель не вернула ответ: {cand.finish_reason})"
-        return Message(role="assistant", text=text, tool_calls=calls)
+        um = getattr(resp, "usage_metadata", None)
+        usage = None
+        if um is not None:
+            prompt = um.prompt_token_count or 0
+            # всё, что не вход (ответ и «размышления»), считаем выходом: так ближе к тому, за что берут деньги
+            usage = Usage(prompt, max(0, (um.total_token_count or 0) - prompt))
+        return Message(role="assistant", text=text, tool_calls=calls, usage=usage)

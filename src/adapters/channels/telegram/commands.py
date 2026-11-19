@@ -15,6 +15,7 @@ COMMANDS = [
     BotCommand(command="cancel", description="Отменить напоминание по номеру"),
     BotCommand(command="memory", description="Что я о тебе помню"),
     BotCommand(command="forget", description="Забыть заметку по номеру"),
+    BotCommand(command="usage", description="Расход токенов за сегодня и неделю"),
     BotCommand(command="history", description="Последние реплики"),
     BotCommand(command="search", description="Поиск по истории"),
     BotCommand(command="reset", description="Очистить историю диалога"),

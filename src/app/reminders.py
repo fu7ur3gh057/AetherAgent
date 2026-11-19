@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Callable, Protocol
 
+from src.core import alerts
 from src.core.messages import Message, Reminder
 from src.core.ports import MessageStore, ReminderStore
 from src.core.recurrence import next_after
@@ -68,6 +69,12 @@ class ReminderService:
         except Exception:
             n = await self._store.record_reminder_failure(r.id, MAX_FAILURES)
             log.exception("reminder #%s: не доставлено (%d/%d)", r.id, n, MAX_FAILURES)
+            if n >= MAX_FAILURES:
+                await alerts.raise_alert(
+                    f"reminder_{r.id}",
+                    f"⏰ Не удалось доставить напоминание #{r.id} после {MAX_FAILURES} попыток: «{r.text}». Оно помечено как неудавшееся.",
+                    cooldown=timedelta(days=1),
+                )
             return
 
         try:  # в историю, чтобы можно было сказать «перенеси это на завтра»

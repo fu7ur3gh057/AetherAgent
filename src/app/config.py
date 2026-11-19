@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     backup_max_age_hours: float = 36
     backup_dir: Path = ROOT / "data" / "backups"
 
+
+    # Дневной лимит токенов (вход + выход, все модели); 0 = без лимита. При 80% бот предупреждает, при 100% не вызывает модель
+    daily_token_limit: int = 500000
+    # Сообщение владельцу при каждом запуске бота (видно рестарты и деплои)
+    startup_notice: bool = True
+    # Ежедневная проверка здоровья (токен Google и т.п.) в HH:MM по TIMEZONE; пусто = выключено
+    health_check_time: str = "09:05"
+    # Срок жизни токена Google в режиме Testing (дни); за 2 дня до него бот предупреждает. 0 = не предупреждать
+    google_token_max_age_days: int = 7
+
     system_prompt_path: Path = ROOT / "src" / "prompts" / "system.md"
 
     @property
@@ -80,6 +90,15 @@ class Settings(BaseSettings):
             return time.fromisoformat(self.backup_check_time.strip())
         except ValueError:
             raise SystemExit("BACKUP_CHECK_TIME должен быть в формате HH:MM, например 09:00") from None
+
+    @property
+    def health_check_at(self) -> time | None:
+        if not self.health_check_time.strip():
+            return None
+        try:
+            return time.fromisoformat(self.health_check_time.strip())
+        except ValueError:
+            raise SystemExit("HEALTH_CHECK_TIME должен быть в формате HH:MM, например 09:05") from None
 
     @property
     def digest_weekdays(self) -> set[int]:

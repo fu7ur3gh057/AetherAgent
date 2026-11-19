@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from anthropic import AsyncAnthropic
 
-from src.core.messages import Message, ToolCall, ToolSpec
+from src.core.messages import Message, ToolCall, ToolSpec, Usage
 
 
 def _to_api(messages: list[Message]) -> list[dict]:
@@ -41,6 +41,7 @@ class ClaudeProvider:
     def __init__(self, api_key: str, model: str, max_tokens: int = 2048):
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
+        self.model_name = f"claude:{model}"
         self._max_tokens = max_tokens
 
     async def chat(
@@ -65,4 +66,6 @@ class ClaudeProvider:
             for b in resp.content
             if b.type == "tool_use"
         ]
-        return Message(role="assistant", text=text, tool_calls=calls)
+        u = getattr(resp, "usage", None)
+        usage = Usage(u.input_tokens or 0, u.output_tokens or 0) if u else None
+        return Message(role="assistant", text=text, tool_calls=calls, usage=usage)
