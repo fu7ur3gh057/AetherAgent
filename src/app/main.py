@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src import capabilities
 from src.adapters.channels.telegram.bot import build_dispatcher, make_bot
+from src.adapters.channels.telegram.commands import register_commands
 from src.adapters.channels.telegram.confirmer import TelegramConfirmer
 from src.adapters.channels.telegram.notifier import TelegramNotifier
 from src.adapters.storage.postgres.store import PostgresStore
@@ -76,6 +77,7 @@ async def main():
         else:
             log.warning("DIGEST_TIME задан, но Gmail не подключён: сводка выключена")
 
+    await register_commands(bot, s.allowed_ids)
     try:
         await dp.start_polling(bot)
     finally:
