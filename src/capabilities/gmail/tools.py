@@ -49,6 +49,7 @@ def _fmt_list(items: list[client.MailInfo]) -> str:
         },
         "required": ["query"],
     },
+    untrusted_output=True,
 )
 async def gmail_search(query: str, max_results: int = 10) -> str:
     return _fmt_list(await asyncio.to_thread(client.search, query, _limit(max_results)))
@@ -63,6 +64,7 @@ async def gmail_search(query: str, max_results: int = 10) -> str:
             "max_results": {"type": "integer", "description": "Сколько писем вернуть, 1-20 (по умолчанию 10)"},
         },
     },
+    untrusted_output=True,
 )
 async def gmail_unread(max_results: int = 10) -> str:
     return _fmt_list(await asyncio.to_thread(client.search, "is:unread in:inbox", _limit(max_results)))
@@ -76,6 +78,7 @@ async def gmail_unread(max_results: int = 10) -> str:
         "properties": {"message_id": {"type": "string", "description": "id письма"}},
         "required": ["message_id"],
     },
+    untrusted_output=True,
 )
 async def gmail_read(message_id: str) -> str:
     m = await asyncio.to_thread(client.read, message_id)

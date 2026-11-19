@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.core.messages import HistoryItem, Message, ToolSpec
+from src.core.messages import HistoryItem, MemoryItem, Message, ToolSpec
 
 
 class LLMProvider(Protocol):
@@ -41,3 +41,20 @@ class Confirmer(Protocol):
         True только при явном подтверждении; отказ, таймаут и ошибка = False.
         """
         ...
+
+
+class MemoryStore(Protocol):
+    async def add_memory(self, chat_id: int, text: str, max_items: int) -> tuple[int, bool]:
+        """Сохранить заметку. Возвращает (id, создана); дубликат не создаётся (False).
+
+        ValueError, если достигнут max_items.
+        """
+        ...
+
+    async def list_memories(self, chat_id: int, limit: int) -> list[MemoryItem]:
+        """Заметки от старых к новым."""
+        ...
+
+    async def get_memory(self, chat_id: int, memory_id: int) -> MemoryItem | None: ...
+
+    async def delete_memory(self, chat_id: int, memory_id: int) -> bool: ...

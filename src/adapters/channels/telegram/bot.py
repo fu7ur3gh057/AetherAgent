@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import logging
+from datetime import timezone, tzinfo
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.enums import ChatAction, ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.enums import ChatAction
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
+from aiogram.types import CallbackQuery, Message
 
 from src.adapters.channels.telegram.confirmer import TelegramConfirmer, is_confirmation
-from src.adapters.channels.telegram.format import md_to_html, split_text
+from src.adapters.channels.telegram.delivery import deliver
 from src.core.agent import Agent
 from src.core.messages import HistoryItem
 
@@ -24,38 +24,32 @@ def _chunks(text: str, size: int = TG_LIMIT):
         yield text[i : i + size]
 
 
-def _fmt(item: HistoryItem) -> str:
+def _fmt(item: HistoryItem, tz: tzinfo = timezone.utc) -> str:
     who = "🧑 Я" if item.role == "user" else "🤖 Aether"
     text = " ".join(item.text.split())
     if len(text) > SNIPPET:
         text = text[:SNIPPET] + "…"
-    return f"🕐 {item.created_at:%d.%m %H:%M} · {who}\n{text}"  # время в UTC
+    return f"🕐 {item.created_at.astimezone(tz):%d.%m %H:%M} · {who}\n{text}"
 
 
 async def send_formatted(m: Message, text: str) -> None:
     """Ответ модели: Markdown -> HTML Telegram; если Telegram не принял разметку, шлём простым текстом."""
-    for chunk in split_text(text):
-        try:
-            await m.answer(
-                md_to_html(chunk),
-                parse_mode=ParseMode.HTML,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
-        except TelegramBadRequest:
-            log.warning("HTML rejected by Telegram, falling back to plain text")
-            await m.answer(chunk, parse_mode=None)
+    await deliver(m.answer, text)
 
 
-async def _send_items(m: Message, items: list[HistoryItem], empty: str) -> None:
+async def _send_items(m: Message, items: list[HistoryItem], empty: str, tz: tzinfo = timezone.utc) -> None:
     if not items:
         await m.answer(empty)
         return
-    for part in _chunks("\n\n".join(_fmt(i) for i in items)):
+    for part in _chunks("\n\n".join(_fmt(i, tz) for i in items)):
         await m.answer(part, parse_mode=None)
 
 
 def build_dispatcher(
-    agent: Agent, allowed_ids: set[int], confirmer: TelegramConfirmer | None = None
+    agent: Agent,
+    allowed_ids: set[int],
+    confirmer: TelegramConfirmer | None = None,
+    tz: tzinfo = timezone.utc,
 ) -> Dispatcher:
     router = Router()
     # доступ только владельцу; остальным бот молчит (и на сообщения, и на нажатия кнопок)
@@ -74,6 +68,8 @@ def build_dispatcher(
             "👋 Aether на связи. Пиши вопрос или просьбу, например «что в почте?».\n\n"
             "🕘 /history [N] — последние реплики\n"
             "🔎 /search слово — поиск по истории\n"
+            "🧠 /memory — что я о тебе помню\n"
+            "🗑 /forget N — забыть заметку\n"
             "🧹 /reset — очистить историю"
         )
 
@@ -86,7 +82,7 @@ def build_dispatcher(
     async def history(m: Message, command: CommandObject):
         n = int(command.args) if command.args and command.args.strip().isdigit() else 10
         items = await agent.recent(m.chat.id, max(1, min(n, MAX_LIST)))
-        await _send_items(m, items, "📭 История пуста.")
+        await _send_items(m, items, "📭 История пуста.", tz)
 
     @router.message(Command("search"))
     async def search(m: Message, command: CommandObject):
@@ -94,7 +90,26 @@ def build_dispatcher(
             await m.answer("🔎 Использование: /search слово")
             return
         items = await agent.search(m.chat.id, command.args.strip(), MAX_LIST)
-        await _send_items(m, items, "🔍 Ничего не найдено.")
+        await _send_items(m, items, "🔍 Ничего не найдено.", tz)
+
+    @router.message(Command("memory"))
+    async def memory(m: Message):
+        items = await agent.memories(m.chat.id)
+        if not items:
+            await m.answer("🧠 Пока ничего не помню. Скажи «запомни, что …».")
+            return
+        lines = [f"#{i.id} · {i.text}" for i in items]
+        for part in _chunks("🧠 Что я о тебе помню:\n\n" + "\n".join(lines)):
+            await m.answer(part, parse_mode=None)
+
+    @router.message(Command("forget"))
+    async def forget(m: Message, command: CommandObject):
+        arg = (command.args or "").strip().lstrip("#")
+        if not arg.isdigit():
+            await m.answer("🗑 Использование: /forget N (номер из /memory)")
+            return
+        ok = await agent.forget(m.chat.id, int(arg))
+        await m.answer("🗑 Забыл." if ok else "🤷 Заметки с таким номером нет.")
 
     @router.message(F.text)
     async def on_text(m: Message):

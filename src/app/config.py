@@ -1,5 +1,7 @@
+from datetime import time
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,6 +22,13 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://aether:aether@localhost:5432/aether"
     history_limit: int = 30
+
+    # IANA-имя, например Asia/Baku. Влияет на «сегодня/вчера» в ответах, /history и расписание
+    timezone: str = "UTC"
+    # Утренняя сводка почты: время HH:MM в TIMEZONE; пусто = выключено
+    digest_time: str = ""
+    # дни недели для сводки (1=пн ... 7=вс)
+    digest_days: str = "1,2,3,4,5,6,7"
     system_prompt_path: Path = ROOT / "src" / "prompts" / "system.md"
 
     @property
@@ -30,6 +39,32 @@ class Settings(BaseSettings):
             raise SystemExit(
                 "ALLOWED_USER_IDS должен содержать числовые Telegram ID через запятую"
             ) from None
+
+    @property
+    def tz(self) -> ZoneInfo:
+        try:
+            return ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise SystemExit(f"TIMEZONE '{self.timezone}' не найден: нужно IANA-имя, например Asia/Baku") from None
+
+    @property
+    def digest_at(self) -> time | None:
+        if not self.digest_time.strip():
+            return None
+        try:
+            return time.fromisoformat(self.digest_time.strip())
+        except ValueError:
+            raise SystemExit("DIGEST_TIME должен быть в формате HH:MM, например 08:30") from None
+
+    @property
+    def digest_weekdays(self) -> set[int]:
+        try:
+            days = {int(x) for x in self.digest_days.split(",") if x.strip()}
+        except ValueError:
+            raise SystemExit("DIGEST_DAYS: числа 1-7 через запятую") from None
+        if not days or not days <= set(range(1, 8)):
+            raise SystemExit("DIGEST_DAYS: числа 1-7 через запятую (1=пн ... 7=вс)")
+        return days
 
     @property
     def system_prompt(self) -> str:

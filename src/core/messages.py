@@ -44,6 +44,15 @@ class HistoryItem:
 
 
 @dataclass
+class MemoryItem:
+    """Долгая заметка о владельце."""
+
+    id: int
+    text: str
+    created_at: datetime
+
+
+@dataclass
 class ToolSpec:
     name: str
     description: str
