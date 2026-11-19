@@ -22,7 +22,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - run: pip install -r requirements.txt
-      - name: Все тесты (каждый файл в своём процессе: инструменты регистрируются глобально)
+      - name: "Все тесты (каждый файл в своём процессе, т.к. инструменты регистрируются глобально)"
         run: |
           for f in tests/test_*.py; do
             echo "::group::$f"
