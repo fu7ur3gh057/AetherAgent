@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+SCOPES = [READ_SCOPE, SEND_SCOPE]  # запрашиваются при получении токена
 
 _ROOT = Path(__file__).resolve().parents[3]
 
@@ -21,9 +24,24 @@ def is_configured() -> bool:
     return token_path().is_file()
 
 
+def token_scopes() -> set[str]:
+    """Права, реально выданные токену (читаем из самого файла)."""
+    try:
+        data = json.loads(token_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    scopes = data.get("scopes") or []
+    return set(scopes.split() if isinstance(scopes, str) else scopes)
+
+
+def has_scope(scope: str) -> bool:
+    return scope in token_scopes()
+
+
 def load_credentials() -> Credentials:
     path = token_path()
-    creds = Credentials.from_authorized_user_file(str(path), SCOPES)
+    # scopes не передаём: берутся из файла, поэтому старый токен (только чтение) продолжает работать
+    creds = Credentials.from_authorized_user_file(str(path))
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())

@@ -49,13 +49,18 @@ tests/
 Новая возможность: папка в `src/capabilities/<name>/` с `tools.py` (`@tool`) и строка в `capabilities.load_all()`.
 Новый провайдер LLM: файл в `src/adapters/llm/` и ветка в `app/wiring.py`.
 
-## Gmail (только чтение)
+## Gmail (чтение и отправка)
 
 1. Google Cloud: проект, Gmail API, OAuth-клиент **Desktop app**, JSON сохранить в `data/google_client.json`.
+   В Data access добавить scopes `gmail.readonly` и `gmail.send`.
 2. `.venv/bin/python scripts/google_auth.py` — браузер, согласие, получится `data/google_token.json`.
 3. `cd ansible && ./deploy.sh gmail` — токен на сервер (600) и перезапуск бота.
 
 Без `data/google_token.json` возможность выключена, бот работает как раньше.
+Если токену выдан только `gmail.readonly`, доступны лишь поиск и чтение; инструменты `gmail_send` и `gmail_reply`
+регистрируются, только когда токен содержит `gmail.send`.
+Отправка всегда идёт через окно подтверждения: адресат (для ответа берётся из исходного письма), тема и полный
+текст (до 3000 символов, до 5 адресатов); ответ уходит только отправителю, без reply-all.
 Всё из почты отдаётся модели в блоке `<untrusted_email_data>` как недоверенные данные.
 
 ## Подтверждение действий

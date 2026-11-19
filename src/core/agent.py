@@ -76,9 +76,16 @@ class Agent:
             approved = False
             if self.confirmer is not None:
                 try:
-                    approved = await self.confirmer.confirm(chat_id, t.describe_call(call.args))
+                    description = await t.describe_call(call.args)
+                except ValueError as e:  # некорректные аргументы: подтверждать нечего, модель может поправить
+                    return ToolResult(call.id, f"Ошибка: {e}", True)
                 except Exception:
-                    log.exception("confirmation failed for %s", call.name)
+                    log.exception("describe failed for %s", call.name)
+                else:
+                    try:
+                        approved = await self.confirmer.confirm(chat_id, description)
+                    except Exception:
+                        log.exception("confirmation failed for %s", call.name)
             if not approved:
                 log.info("tool %s declined", call.name)
                 return ToolResult(

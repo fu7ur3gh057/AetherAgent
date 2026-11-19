@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
@@ -17,11 +18,13 @@ class Tool:
     func: Callable[..., Awaitable[str]]
     risk: Risk = "read"
     # человекочитаемое описание действия для окна подтверждения (строится из РЕАЛЬНЫХ аргументов)
-    describe: Callable[[dict[str, Any]], str] | None = None
+    # может быть sync или async (например, чтобы дочитать адресата ответа из исходного письма)
+    describe: Callable[[dict[str, Any]], str | Awaitable[str]] | None = None
 
-    def describe_call(self, args: dict[str, Any]) -> str:
+    async def describe_call(self, args: dict[str, Any]) -> str:
         if self.describe:
-            return self.describe(args)
+            out = self.describe(args)
+            return await out if inspect.isawaitable(out) else out
         return f"{self.spec.name}\n{json.dumps(args, ensure_ascii=False, indent=2)}"
 
 
@@ -33,7 +36,7 @@ def tool(
     description: str,
     parameters: dict[str, Any] | None = None,
     risk: Risk = "read",
-    describe: Callable[[dict[str, Any]], str] | None = None,
+    describe: Callable[[dict[str, Any]], str | Awaitable[str]] | None = None,
 ):
     schema = parameters or {"type": "object", "properties": {}}
 
