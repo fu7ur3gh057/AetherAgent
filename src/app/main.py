@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src import capabilities
 from src.adapters.channels.telegram.bot import build_dispatcher, make_bot
+from src.adapters.channels.telegram.confirmer import TelegramConfirmer
 from src.adapters.storage.postgres.store import PostgresStore
 from src.app.config import get_settings
 from src.app.wiring import make_provider
@@ -26,9 +27,10 @@ async def main():
 
     capabilities.load_all()
     store = PostgresStore(s.database_url)
-    agent = Agent(make_provider(s), store, s.system_prompt, s.history_limit)
     bot = make_bot(s.telegram_bot_token)
-    dp = build_dispatcher(agent, s.allowed_ids)
+    confirmer = TelegramConfirmer(bot)
+    agent = Agent(make_provider(s), store, s.system_prompt, s.history_limit, confirmer)
+    dp = build_dispatcher(agent, s.allowed_ids, confirmer)
 
     hb = asyncio.create_task(_heartbeat())
     try:

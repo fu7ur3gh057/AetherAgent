@@ -32,3 +32,12 @@ class MessageStore(Protocol):
     async def search(self, chat_id: int, query: str, limit: int) -> list[HistoryItem]:
         """Реплики, содержащие query (без учёта регистра), от старых к новым."""
         ...
+
+
+class Confirmer(Protocol):
+    async def confirm(self, chat_id: int, description: str) -> bool:
+        """Показать владельцу описание действия и дождаться решения.
+
+        True только при явном подтверждении; отказ, таймаут и ошибка = False.
+        """
+        ...

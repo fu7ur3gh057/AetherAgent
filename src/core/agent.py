@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections import defaultdict
 
 from src.core.messages import HistoryItem, Message, ToolCall, ToolResult
-from src.core.ports import LLMProvider, MessageStore
+from src.core.ports import Confirmer, LLMProvider, MessageStore
 from src.core.tools import REGISTRY, specs
 
 log = logging.getLogger(__name__)
@@ -13,13 +15,28 @@ MAX_STEPS = 6
 
 
 class Agent:
-    def __init__(self, llm: LLMProvider, store: MessageStore, system_prompt: str, history_limit: int):
+    def __init__(
+        self,
+        llm: LLMProvider,
+        store: MessageStore,
+        system_prompt: str,
+        history_limit: int,
+        confirmer: Confirmer | None = None,
+    ):
         self.llm = llm
         self.store = store
         self.system_prompt = system_prompt
         self.history_limit = history_limit
+        self.confirmer = confirmer
+        # один диалог обрабатываем строго по очереди: пока ждём подтверждение,
+        # следующее сообщение не должно перемешать историю
+        self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def handle(self, chat_id: int, text: str) -> str:
+        async with self._locks[chat_id]:
+            return await self._handle(chat_id, text)
+
+    async def _handle(self, chat_id: int, text: str) -> str:
         history = await self.store.history(chat_id, self.history_limit)
         new: list[Message] = [Message(role="user", text=text)]
         reply = ""
@@ -30,7 +47,7 @@ class Agent:
             if not resp.tool_calls:
                 reply = resp.text
                 break
-            results = [await self._run_tool(c) for c in resp.tool_calls]
+            results = [await self._run_tool(chat_id, c) for c in resp.tool_calls]
             new.append(Message(role="tool", tool_results=results))
         else:
             reply = "Не смог закончить за разумное число шагов, попробуй переформулировать."
@@ -40,7 +57,8 @@ class Agent:
         return reply or "(пустой ответ)"
 
     async def reset(self, chat_id: int) -> None:
-        await self.store.clear(chat_id)
+        async with self._locks[chat_id]:
+            await self.store.clear(chat_id)
 
     async def recent(self, chat_id: int, limit: int = 10) -> list[HistoryItem]:
         return await self.store.recent(chat_id, limit)
@@ -48,11 +66,27 @@ class Agent:
     async def search(self, chat_id: int, query: str, limit: int = 10) -> list[HistoryItem]:
         return await self.store.search(chat_id, query, limit)
 
-    async def _run_tool(self, call: ToolCall) -> ToolResult:
+    async def _run_tool(self, chat_id: int, call: ToolCall) -> ToolResult:
         t = REGISTRY.get(call.name)
         if t is None:
             return ToolResult(call.id, f"Неизвестный инструмент: {call.name}", True)
-        # TODO: risk=="write" -> запрос подтверждения у владельца через канал
+
+        if t.risk == "write":
+            # fail closed: без подтверждающего канала действия с эффектом не выполняем
+            approved = False
+            if self.confirmer is not None:
+                try:
+                    approved = await self.confirmer.confirm(chat_id, t.describe_call(call.args))
+                except Exception:
+                    log.exception("confirmation failed for %s", call.name)
+            if not approved:
+                log.info("tool %s declined", call.name)
+                return ToolResult(
+                    call.id,
+                    "Владелец не подтвердил действие, оно НЕ выполнено. Не повторяй его без новой просьбы.",
+                    True,
+                )
+
         try:
             return ToolResult(call.id, await t.func(**call.args))
         except Exception as e:  # ошибка инструмента не должна валить диалог

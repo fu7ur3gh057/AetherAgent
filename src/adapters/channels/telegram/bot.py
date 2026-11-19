@@ -5,8 +5,9 @@ import logging
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
+from src.adapters.channels.telegram.confirmer import TelegramConfirmer, is_confirmation
 from src.core.agent import Agent
 from src.core.messages import HistoryItem
 
@@ -37,10 +38,19 @@ async def _send_items(m: Message, items: list[HistoryItem], empty: str) -> None:
         await m.answer(part, parse_mode=None)
 
 
-def build_dispatcher(agent: Agent, allowed_ids: set[int]) -> Dispatcher:
+def build_dispatcher(
+    agent: Agent, allowed_ids: set[int], confirmer: TelegramConfirmer | None = None
+) -> Dispatcher:
     router = Router()
-    # доступ только владельцу; остальным бот молчит
+    # доступ только владельцу; остальным бот молчит (и на сообщения, и на нажатия кнопок)
     router.message.filter(F.from_user.id.in_(allowed_ids))
+    router.callback_query.filter(F.from_user.id.in_(allowed_ids))
+
+    if confirmer is not None:
+
+        @router.callback_query(F.data.func(is_confirmation))
+        async def on_confirmation(cb: CallbackQuery):
+            await confirmer.on_callback(cb)
 
     @router.message(Command("start"))
     async def start(m: Message):
