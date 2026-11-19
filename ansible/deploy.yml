@@ -61,6 +61,24 @@
         mode: "0600"
       tags: [setup, env]
 
+    - name: Gmail | папка data на сервере
+      ansible.builtin.file:
+        path: "{{ aether_root }}/data"
+        state: directory
+        mode: "0700"
+      tags: [setup, gmail]
+
+    - name: Gmail | загрузить google_token.json с мака (права 600)
+      ansible.builtin.copy:
+        src: ../data/google_token.json
+        dest: "{{ aether_root }}/data/google_token.json"
+        mode: "0600"
+      tags: [gmail]
+
+    - name: Gmail | перезапустить бота, чтобы подхватил токен
+      ansible.builtin.command: docker compose -f {{ compose_file }} up -d --build bot
+      tags: [gmail]
+
     - name: Env | перезапустить после смены .env
       ansible.builtin.command: docker compose -f {{ compose_file }} up -d --build
       tags: [env]
@@ -82,7 +100,7 @@
       retries: 30
       delay: 5
       changed_when: false
-      tags: [deploy, setup, env]
+      tags: [deploy, setup, env, gmail]
 
     - name: Что выкачено
       ansible.builtin.shell: |
@@ -90,8 +108,8 @@
         docker compose -f {{ compose_file }} ps --format 'table {{ '{{' }}.Name{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}'
       register: summary
       changed_when: false
-      tags: [deploy, setup, env]
+      tags: [deploy, setup, env, gmail]
 
     - ansible.builtin.debug:
         msg: "{{ summary.stdout_lines }}"
-      tags: [deploy, setup, env]
+      tags: [deploy, setup, env, gmail]

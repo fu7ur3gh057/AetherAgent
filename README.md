@@ -49,4 +49,13 @@ tests/
 Новая возможность: папка в `src/capabilities/<name>/` с `tools.py` (`@tool`) и строка в `capabilities.load_all()`.
 Новый провайдер LLM: файл в `src/adapters/llm/` и ветка в `app/wiring.py`.
 
+## Gmail (только чтение)
+
+1. Google Cloud: проект, Gmail API, OAuth-клиент **Desktop app**, JSON сохранить в `data/google_client.json`.
+2. `.venv/bin/python scripts/google_auth.py` — браузер, согласие, получится `data/google_token.json`.
+3. `cd ansible && ./deploy.sh gmail` — токен на сервер (600) и перезапуск бота.
+
+Без `data/google_token.json` возможность выключена, бот работает как раньше.
+Всё из почты отдаётся модели в блоке `<untrusted_email_data>` как недоверенные данные.
+
 Запуск без Docker: `python -m src.app.main`.
