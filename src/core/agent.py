@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone, tzinfo
 
@@ -16,6 +17,30 @@ from src.core.tools import REGISTRY, specs
 log = logging.getLogger(__name__)
 MAX_STEPS = 6
 MEMORY_IN_PROMPT = 100  # сколько заметок о владельце подставляем в промпт
+
+# Страховка от «ленивых» ответов. Модель иногда вместо вызова инструмента пишет «нет доступа к данным» или
+# «сейчас поищу», хотя web_search доступен (наблюдалось на настоящем Gemini). Такой ответ короткий и без вызова
+# инструмента: тогда один раз напоминаем про поиск и повторяем запрос.
+LAZY_RE = re.compile(
+    r"нет доступа|не имею доступа|не располагаю|в режиме реального времени|"
+    r"не могу (дать|найти|показать|предоставить|сообщить|проверить|узнать|получить)|не в состоянии (получить|найти)|"
+    r"у меня нет (данных|информации|возможности)|"
+    r"(поищу|поищем|найду|выполню поиск|проверю в интернете)|"
+    r"если ты (их )?(укажешь|уточнишь)|уточни(те)?[, ]+(пожалуйста[, ]+)?(даты|дату|период)",
+    re.I,
+)
+LAZY_MAX_CHARS = 500  # длинный содержательный ответ ленивым не считаем
+LAZY_TOOL = "web_search"
+LAZY_NUDGE = (
+    "Системное напоминание: у тебя есть инструмент web_search (поиск в интернете). Не говори, что у тебя нет доступа, "
+    "не обещай поискать и не проси уточнить даты. Если вопрос требует свежих или меняющихся данных, вызови web_search "
+    "прямо сейчас (даты и период вычисли сам из текущей даты). Если вопрос вовсе не про свежие данные, просто ответь заново."
+)
+
+
+def looks_lazy(text: str) -> bool:
+    return bool(text) and len(text) <= LAZY_MAX_CHARS and LAZY_RE.search(text) is not None
+
 
 def _n(x: int) -> str:
     return f"{x:,}".replace(",", " ")  # 12 345 вместо 12345
@@ -67,6 +92,7 @@ class Agent:
         # «заражённый» ход: в нём уже есть данные из внешнего мира (письма, а также содержимое вложений:
         # в фото и документе может быть спрятана инструкция для бота)
         tainted = bool(attachments)
+        retried = False  # страховка от ленивого ответа срабатывает не больше раза за ход
 
         for step in range(MAX_STEPS):
             blocked = await self._budget_block()
@@ -79,6 +105,16 @@ class Agent:
             resp = await self.llm.chat(system, history + new, specs())
             await self._record_usage(resp.usage)
             new.append(resp)
+            if not resp.tool_calls and not retried and self._lazy(resp, new):
+                retried = True
+                if await self._budget_block() is None:
+                    log.info("ленивый ответ без вызова %s, повторяю с напоминанием", LAZY_TOOL)
+                    probe = new + [Message(role="user", text=LAZY_NUDGE)]
+                    again = await self.llm.chat(system, history + probe, specs())
+                    await self._record_usage(again.usage)
+                    new.pop()  # ленивый ответ и напоминание в историю не попадают: иначе модель будет подражать отказу
+                    new.append(again)
+                    resp = again
             if not resp.tool_calls:
                 reply = resp.text
                 break
@@ -144,6 +180,13 @@ class Agent:
         today = self._today()
         rows = await self.usage.usage_since(today - timedelta(days=days - 1)) if self.usage else []
         return UsageSummary(today=today, limit=self.daily_token_limit, rows=rows)
+
+    @staticmethod
+    def _lazy(resp: Message, new: list[Message]) -> bool:
+        """Ответ без инструмента, похожий на отказ или обещание, при том что поиск доступен и в этом ходу не вызывался."""
+        if LAZY_TOOL not in REGISTRY or not looks_lazy(resp.text):
+            return False
+        return not any(m.tool_calls for m in new)
 
     async def _system(self, chat_id: int) -> str:
         # модель не знает ни даты, ни часового пояса владельца
